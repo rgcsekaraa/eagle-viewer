@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible problem in Eagle Viewer
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please avoid uploading private or copyrighted images. Prefer a synthetic or redistributable fixture.
+  - type: input
+    id: version
+    attributes:
+      label: Eagle Viewer version or commit
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Mac and macOS version
+      placeholder: MacBook Pro M3, macOS 15.1
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include the exact steps, expected result and actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: image
+    attributes:
+      label: Image details
+      description: Format, dimensions, file size and application/camera that created it.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or benchmark output
+      render: shell

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: Test, lint and bundle
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt -- --check
+      - name: Run tests
+        run: cargo test --locked
+      - name: Run clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build release bundle
+        run: ./scripts/bundle.sh
+      - name: Verify application bundle
+        run: |
+          plutil -lint "target/release/bundle/osx/Eagle Viewer.app/Contents/Info.plist"
+          codesign --verify --deep --strict "target/release/bundle/osx/Eagle Viewer.app"
