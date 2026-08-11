@@ -635,7 +635,7 @@ fn mounted_external_volumes() -> Result<Vec<Volume>, String> {
             free_space: concise_size(info.get("Volume Free Space")),
         });
     }
-    volumes.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    volumes.sort_by_key(|volume| volume.name.to_lowercase());
     Ok(volumes)
 }
 
