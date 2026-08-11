@@ -1,0 +1,36 @@
+[package]
+name = "eagle-viewer"
+version = "0.1.0"
+edition = "2024"
+default-run = "eagle-viewer"
+description = "A GPU-first, low-latency image viewer for macOS"
+license = "MIT"
+repository = "https://github.com/rgcsekaraa/eagle-viewer"
+homepage = "https://github.com/rgcsekaraa/eagle-viewer"
+readme = "README.md"
+keywords = ["image-viewer", "macos", "raw", "wgpu", "photography"]
+categories = ["multimedia::images", "graphics"]
+
+[dependencies]
+anyhow = "1.0"
+crossbeam-channel = "0.5"
+eframe = { version = "0.35", default-features = false, features = ["accesskit", "default_fonts", "wgpu"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
+jpeg-decoder = "0.3"
+memmap2 = "0.9"
+png = "0.18"
+rawler = { version = "0.7.2", default-features = false }
+rfd = "0.17"
+zune-jpeg = "0.5"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[package.metadata.bundle]
+name = "Eagle Viewer"
+identifier = "com.eagleviewer.app"
+category = "public.app-category.graphics-design"
+short_description = "A fast viewer for very large images"
+osx_minimum_system_version = "12.0"
