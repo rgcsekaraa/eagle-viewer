@@ -1,6 +1,6 @@
 [package]
 name = "eagle-viewer"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 default-run = "eagle-viewer"
 description = "A GPU-first, low-latency image viewer for macOS"
@@ -23,6 +23,9 @@ png = "0.18"
 rawler = { version = "0.7.2", default-features = false }
 rfd = "0.17"
 zune-jpeg = "0.5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSString", "NSUserDefaults"] }
 
 [profile.release]
 lto = "thin"

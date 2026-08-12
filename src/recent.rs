@@ -47,7 +47,7 @@ impl RecentFiles {
     }
 
     pub fn record(&mut self, path: &Path) {
-        if !path.is_file() || path.to_string_lossy().contains(['\n', '\r']) {
+        if !path.is_file() || !is_supported(path) || path.to_string_lossy().contains(['\n', '\r']) {
             return;
         }
         self.entries.retain(|existing| existing != path);
@@ -115,9 +115,13 @@ mod tests {
         }
         let newest = temporary.join("image-13.png");
         recent.record(&newest);
+        let unsupported = temporary.join("notes.txt");
+        fs::write(&unsupported, b"not an image").unwrap();
+        recent.record(&unsupported);
 
         assert_eq!(recent.entries().len(), MAX_RECENT_FILES);
         assert_eq!(recent.most_recent(), Some(newest.as_path()));
+        assert!(!recent.entries().contains(&unsupported));
         assert_eq!(
             RecentFiles::load_from(Some(storage)).entries(),
             recent.entries()

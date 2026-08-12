@@ -53,6 +53,13 @@ impl PreviewCache {
         self.entries.get(path).cloned()
     }
 
+    pub fn remove(&mut self, path: &Path) {
+        if let Some(preview) = self.entries.remove(path) {
+            self.used_bytes = self.used_bytes.saturating_sub(preview.memory_bytes());
+        }
+        self.order.retain(|candidate| candidate != path);
+    }
+
     pub fn insert(&mut self, preview: CachedPreview, protected: Option<&Path>) {
         let path = preview.image.path.clone();
         if let Some(old) = self.entries.insert(path.clone(), preview.clone()) {

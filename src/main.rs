@@ -10,7 +10,31 @@ use std::{path::PathBuf, sync::Arc};
 
 use eframe::egui;
 
+#[cfg(target_os = "macos")]
+fn disable_unmanaged_window_restoration() {
+    use objc2_foundation::{NSUserDefaults, ns_string};
+
+    let defaults = NSUserDefaults::standardUserDefaults();
+    defaults.setBool_forKey(true, ns_string!("ApplePersistenceIgnoreState"));
+    defaults.setBool_forKey(false, ns_string!("NSQuitAlwaysKeepsWindows"));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn disable_unmanaged_window_restoration() {}
+
+fn parse_window_size(value: &str) -> Option<[f32; 2]> {
+    let value = value.strip_prefix("size=")?;
+    let (width, height) = value.split_once('x')?;
+    let width = width.parse::<f32>().ok()?;
+    let height = height.parse::<f32>().ok()?;
+    (width.is_finite() && height.is_finite() && width >= 480.0 && height >= 320.0)
+        .then_some([width, height])
+}
+
 fn main() -> eframe::Result {
+    // eframe owns window creation and persistence; AppKit restoration has no
+    // restoration class for this window and can otherwise suppress it after a forced quit.
+    disable_unmanaged_window_restoration();
     let mut arguments = std::env::args_os().skip(1);
     let first_argument = arguments.next();
     if matches!(
@@ -57,16 +81,17 @@ fn main() -> eframe::Result {
     let mut screenshot_path = None;
     let mut forced_dark_mode = None;
     let mut screenshot_info = false;
+    let mut screenshot_size = None;
     let initial_path = if first_argument.as_deref() == Some(std::ffi::OsStr::new("--screenshot")) {
         let Some(output) = arguments.next().map(PathBuf::from) else {
             eprintln!(
-                "usage: eagle-viewer --screenshot /path/to/output.png /path/to/image [light|dark] [info]"
+                "usage: eagle-viewer --screenshot /path/to/output.png /path/to/image [light|dark] [info] [size=WIDTHxHEIGHT]"
             );
             return Ok(());
         };
         let Some(image) = arguments.next().map(PathBuf::from) else {
             eprintln!(
-                "usage: eagle-viewer --screenshot /path/to/output.png /path/to/image [light|dark] [info]"
+                "usage: eagle-viewer --screenshot /path/to/output.png /path/to/image [light|dark] [info] [size=WIDTHxHEIGHT]"
             );
             return Ok(());
         };
@@ -76,7 +101,11 @@ fn main() -> eframe::Result {
                 value if value == std::ffi::OsStr::new("light") => forced_dark_mode = Some(false),
                 value if value == std::ffi::OsStr::new("dark") => forced_dark_mode = Some(true),
                 value if value == std::ffi::OsStr::new("info") => screenshot_info = true,
-                _ => {}
+                value => {
+                    if let Some(value) = value.to_str() {
+                        screenshot_size = parse_window_size(value).or(screenshot_size);
+                    }
+                }
             }
         }
         Some(image)
@@ -95,10 +124,11 @@ fn main() -> eframe::Result {
     };
     let native_options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
+        persist_window: screenshot_path.is_none(),
         viewport: egui::ViewportBuilder::default()
             .with_title("Eagle Viewer")
-            .with_inner_size([1280.0, 820.0])
-            .with_min_inner_size([640.0, 420.0])
+            .with_inner_size(screenshot_size.unwrap_or([1280.0, 820.0]))
+            .with_min_inner_size([480.0, 320.0])
             .with_drag_and_drop(true)
             .with_icon(Arc::new(icon_data)),
         ..Default::default()
@@ -117,4 +147,17 @@ fn main() -> eframe::Result {
             )))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_safe_screenshot_window_sizes() {
+        assert_eq!(parse_window_size("size=640x420"), Some([640.0, 420.0]));
+        assert_eq!(parse_window_size("size=479x420"), None);
+        assert_eq!(parse_window_size("size=319x420"), None);
+        assert_eq!(parse_window_size("size=wide"), None);
+    }
 }

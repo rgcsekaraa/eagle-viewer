@@ -14,7 +14,7 @@ use egui_phosphor::regular as icons;
 
 use crate::{
     cache::{CachedPreview, PreviewCache},
-    catalog::Catalog,
+    catalog::{Catalog, is_supported},
     detail::{DetailImage, DetailLoader},
     loader::{DecodedImage, ImageLoader, RequestKind},
     recent::RecentFiles,
@@ -27,6 +27,39 @@ const MAX_GPU_TILES: usize = 256;
 const TOOLBAR_HEIGHT: f32 = 44.0;
 const TOOLBAR_BUTTON_HEIGHT: f32 = 28.0;
 const TOOLBAR_ICON_BUTTON_WIDTH: f32 = 32.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ToolbarLayout {
+    brand_text: bool,
+    labeled_open: bool,
+    actual_size: bool,
+    transforms: bool,
+    info_and_filmstrip: bool,
+    labeled_toggles: bool,
+    slideshow: bool,
+    fullscreen: bool,
+    appearance: bool,
+    filename: bool,
+    labeled_more: bool,
+}
+
+impl ToolbarLayout {
+    fn for_width(width: f32) -> Self {
+        Self {
+            brand_text: width >= 780.0,
+            labeled_open: width >= 780.0,
+            actual_size: width >= 620.0,
+            transforms: width >= 1_200.0,
+            info_and_filmstrip: width >= 480.0,
+            labeled_toggles: width >= 1_020.0,
+            slideshow: width >= 620.0,
+            fullscreen: width >= 540.0,
+            appearance: width >= 900.0,
+            filename: width >= 1_440.0,
+            labeled_more: width >= 780.0,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CanvasBackground {
@@ -60,6 +93,56 @@ fn open_button(ui: &mut egui::Ui) -> Response {
         vec2(80.0, TOOLBAR_BUTTON_HEIGHT),
         egui::Button::new(RichText::new(format!("{}  Open", icons::FOLDER_OPEN)).size(13.0)),
     )
+}
+
+fn compact_open_button(ui: &mut egui::Ui) -> Response {
+    toolbar_icon_button(ui, icons::FOLDER_OPEN, true)
+}
+
+fn truncate_middle(value: &str, maximum_characters: usize) -> String {
+    let count = value.chars().count();
+    if count <= maximum_characters || maximum_characters < 5 {
+        return value.to_owned();
+    }
+    let left = (maximum_characters - 1) / 2;
+    let right = maximum_characters - left - 1;
+    let beginning = value.chars().take(left).collect::<String>();
+    let ending = value
+        .chars()
+        .rev()
+        .take(right)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("{beginning}…{ending}")
+}
+
+fn truncate_end(value: &str, maximum_characters: usize) -> String {
+    if value.chars().count() <= maximum_characters {
+        value.to_owned()
+    } else {
+        format!(
+            "{}…",
+            value
+                .chars()
+                .take(maximum_characters.saturating_sub(1))
+                .collect::<String>()
+        )
+    }
+}
+
+fn paint_centered_message(
+    painter: &egui::Painter,
+    viewport: Rect,
+    text: String,
+    font: FontId,
+    color: Color32,
+) {
+    let wrap_width = (viewport.width() - 40.0).clamp(120.0, 560.0);
+    let galley = painter.layout(text, font, color, wrap_width);
+    let position = viewport.center() - galley.size() * 0.5;
+    painter.galley(position, galley, color);
 }
 
 fn viewport_zoom_factor(gesture_zoom: f32, scroll: Vec2) -> Option<f32> {
@@ -169,6 +252,7 @@ pub struct EagleApp {
     screenshot_path: Option<PathBuf>,
     screenshot_requested: bool,
     screenshot_settle_frames: u8,
+    scroll_filmstrip_to_current: bool,
 }
 
 impl EagleApp {
@@ -233,6 +317,7 @@ impl EagleApp {
             screenshot_path,
             screenshot_requested: false,
             screenshot_settle_frames: 0,
+            scroll_filmstrip_to_current: false,
         };
         if let Some(path) = initial_path.filter(|path| path.is_file()) {
             app.open(path, app.screenshot_path.is_none());
@@ -276,9 +361,24 @@ impl EagleApp {
     }
 
     fn open(&mut self, path: PathBuf, remember: bool) {
+        let path = path.canonicalize().unwrap_or(path);
+        if !path.is_file() || !is_supported(&path) {
+            self.catalog = Catalog::default();
+            self.current = None;
+            self.texture = None;
+            self.loading = false;
+            self.clear_detail();
+            self.error = Some(format!(
+                "{} is not a supported image file",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            ));
+            return;
+        }
         if remember {
             self.recent_files.record(&path);
         }
+        // An explicit reopen must reflect edits made by another application.
+        self.cache.remove(&path);
         self.catalog = Catalog::around(&path);
         self.load_current();
     }
@@ -288,6 +388,7 @@ impl EagleApp {
             return;
         };
         self.generation = self.generation.wrapping_add(1);
+        self.scroll_filmstrip_to_current = true;
         self.error = None;
         self.view.reset();
         self.rotation = 0;
@@ -299,6 +400,8 @@ impl EagleApp {
             self.install_cached(image);
             self.loading = false;
         } else {
+            self.current = None;
+            self.texture = None;
             self.loading = true;
             self.loader.request_current(path, self.generation);
         }
@@ -438,6 +541,32 @@ impl EagleApp {
         self.view.reset();
     }
 
+    fn set_actual_size(&mut self) {
+        if let (Some(viewport), Some(image)) = (self.last_viewport, &self.current) {
+            self.view
+                .set_actual_size(viewport, self.oriented_size(image.original_size));
+        }
+    }
+
+    fn toggle_slideshow(&mut self) {
+        if self.catalog.len() < 2 {
+            self.slideshow = false;
+            return;
+        }
+        self.slideshow = !self.slideshow;
+        self.last_slide = Instant::now();
+    }
+
+    fn rotate_counterclockwise(&mut self) {
+        self.rotation = (self.rotation + 3) % 4;
+        self.view.reset();
+    }
+
+    fn rotate_clockwise(&mut self) {
+        self.rotation = (self.rotation + 1) % 4;
+        self.view.reset();
+    }
+
     fn adjust_slideshow_speed(&mut self, faster: bool) {
         const SPEEDS: &[u64] = &[2, 3, 5, 10];
         let current = SPEEDS
@@ -522,11 +651,8 @@ impl EagleApp {
         if ctx.input(|input| input.key_pressed(egui::Key::Num0)) {
             self.view.reset();
         }
-        if ctx.input(|input| input.key_pressed(egui::Key::Num1))
-            && let (Some(viewport), Some(image)) = (self.last_viewport, &self.current)
-        {
-            self.view
-                .set_actual_size(viewport, self.oriented_size(image.original_size));
+        if ctx.input(|input| input.key_pressed(egui::Key::Num1)) {
+            self.set_actual_size();
         }
         if ctx.input(|input| input.key_pressed(egui::Key::Plus)) {
             self.view.zoom_step(1.25);
@@ -535,12 +661,11 @@ impl EagleApp {
             self.view.zoom_step(0.8);
         }
         if !command && ctx.input(|input| input.key_pressed(egui::Key::R)) {
-            self.rotation = if shift {
-                (self.rotation + 3) % 4
+            if shift {
+                self.rotate_counterclockwise();
             } else {
-                (self.rotation + 1) % 4
-            };
-            self.view.reset();
+                self.rotate_clockwise();
+            }
         }
         if !command && ctx.input(|input| input.key_pressed(egui::Key::H)) {
             self.flip_horizontal = !self.flip_horizontal;
@@ -555,8 +680,7 @@ impl EagleApp {
             self.show_filmstrip = !self.show_filmstrip;
         }
         if !command && ctx.input(|input| input.key_pressed(egui::Key::Space)) {
-            self.slideshow = !self.slideshow;
-            self.last_slide = Instant::now();
+            self.toggle_slideshow();
         }
         if !command && ctx.input(|input| input.key_pressed(egui::Key::T)) {
             self.toggle_appearance(ctx);
@@ -621,341 +745,564 @@ impl EagleApp {
                 ui.spacing_mut().button_padding = vec2(7.0, 4.0);
                 ui.spacing_mut().interact_size =
                     vec2(TOOLBAR_ICON_BUTTON_WIDTH, TOOLBAR_BUTTON_HEIGHT);
-                egui::ScrollArea::horizontal()
-                    .id_salt("main-toolbar")
-                    .show(ui, |ui| {
-                        ui.horizontal_centered(|ui| {
-                            let (icon_rect, _) = ui.allocate_exact_size(
-                                vec2(TOOLBAR_BUTTON_HEIGHT, TOOLBAR_BUTTON_HEIGHT),
-                                Sense::hover(),
-                            );
-                            ui.painter().image(
-                                self.brand_icon.id(),
-                                icon_rect,
-                                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                                Color32::WHITE,
-                            );
-                            ui.label(
-                                RichText::new("EAGLE")
-                                    .strong()
-                                    .color(Color32::from_rgb(235, 58, 72)),
-                            );
-                            ui.separator();
-                            if open_button(ui)
-                                .on_hover_text("Open image (Cmd+O)")
-                                .clicked()
-                            {
-                                self.open_dialog();
-                            }
+                let layout = ToolbarLayout::for_width(ui.available_width());
+                ui.horizontal_centered(|ui| {
+                    let (icon_rect, _) = ui.allocate_exact_size(
+                        vec2(TOOLBAR_BUTTON_HEIGHT, TOOLBAR_BUTTON_HEIGHT),
+                        Sense::hover(),
+                    );
+                    ui.painter().image(
+                        self.brand_icon.id(),
+                        icon_rect,
+                        Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    if layout.brand_text {
+                        ui.label(
+                            RichText::new("EAGLE")
+                                .strong()
+                                .color(Color32::from_rgb(235, 58, 72)),
+                        );
+                    }
+                    ui.separator();
+                    let open_response = if layout.labeled_open {
+                        open_button(ui)
+                    } else {
+                        compact_open_button(ui)
+                    };
+                    if open_response.on_hover_text("Open image (Cmd+O)").clicked() {
+                        self.open_dialog();
+                    }
 
-                            ui.separator();
-                            let can_previous = self.catalog.position() > 0;
-                            if toolbar_icon_button(ui, icons::CARET_LEFT, can_previous)
-                                .on_hover_text("Previous image (Left Arrow)")
-                                .clicked()
-                            {
-                                self.move_by(-1);
-                            }
-                            let can_next = self.catalog.position() + 1 < self.catalog.len();
-                            if toolbar_icon_button(ui, icons::CARET_RIGHT, can_next)
-                                .on_hover_text("Next image (Right Arrow)")
-                                .clicked()
-                            {
-                                self.move_by(1);
-                            }
+                    ui.separator();
+                    let can_previous = self.catalog.position() > 0;
+                    if toolbar_icon_button(ui, icons::CARET_LEFT, can_previous)
+                        .on_hover_text("Previous image (Left Arrow)")
+                        .clicked()
+                    {
+                        self.move_by(-1);
+                    }
+                    let can_next = self.catalog.position() + 1 < self.catalog.len();
+                    if toolbar_icon_button(ui, icons::CARET_RIGHT, can_next)
+                        .on_hover_text("Next image (Right Arrow)")
+                        .clicked()
+                    {
+                        self.move_by(1);
+                    }
 
-                            ui.separator();
-                            if toolbar_icon_button(ui, icons::MINUS, true)
-                                .on_hover_text("Zoom out (-)")
-                                .clicked()
-                            {
-                                self.view.zoom_step(0.8);
-                            }
-                            if toolbar_icon_button(ui, icons::PLUS, true)
-                                .on_hover_text("Zoom in (+)")
-                                .clicked()
-                            {
-                                self.view.zoom_step(1.25);
-                            }
-                            if ui
-                                .add_sized(
-                                    vec2(56.0, TOOLBAR_BUTTON_HEIGHT),
-                                    egui::Button::new(format!("{}  Fit", icons::ARROWS_IN_SIMPLE)),
-                                )
-                                .on_hover_text("Fit to window (0)")
-                                .clicked()
-                            {
-                                self.view.reset();
-                            }
-                            if ui
-                                .add_sized(
-                                    vec2(44.0, TOOLBAR_BUTTON_HEIGHT),
-                                    egui::Button::new("1:1"),
-                                )
-                                .on_hover_text("Actual pixels (1)")
-                                .clicked()
-                                && let (Some(viewport), Some(image)) =
-                                    (self.last_viewport, &self.current)
-                            {
-                                self.view.set_actual_size(
-                                    viewport,
-                                    self.oriented_size(image.original_size),
-                                );
-                            }
+                    ui.separator();
+                    let has_image = self.current.is_some();
+                    if toolbar_icon_button(ui, icons::MINUS, has_image)
+                        .on_hover_text("Zoom out (-)")
+                        .clicked()
+                    {
+                        self.view.zoom_step(0.8);
+                    }
+                    if toolbar_icon_button(ui, icons::PLUS, has_image)
+                        .on_hover_text("Zoom in (+)")
+                        .clicked()
+                    {
+                        self.view.zoom_step(1.25);
+                    }
+                    let fit_button = if layout.labeled_open {
+                        egui::Button::new(format!("{}  Fit", icons::ARROWS_IN_SIMPLE))
+                    } else {
+                        egui::Button::new(RichText::new(icons::ARROWS_IN_SIMPLE).size(17.0))
+                    };
+                    let fit_width = if layout.labeled_open {
+                        56.0
+                    } else {
+                        TOOLBAR_ICON_BUTTON_WIDTH
+                    };
+                    if ui
+                        .add_enabled(
+                            has_image,
+                            fit_button.min_size(vec2(fit_width, TOOLBAR_BUTTON_HEIGHT)),
+                        )
+                        .on_hover_text("Fit to window (0)")
+                        .clicked()
+                    {
+                        self.view.reset();
+                    }
+                    if layout.actual_size
+                        && ui
+                            .add_enabled(
+                                has_image,
+                                egui::Button::new("1:1")
+                                    .min_size(vec2(44.0, TOOLBAR_BUTTON_HEIGHT)),
+                            )
+                            .on_hover_text("Actual pixels (1)")
+                            .clicked()
+                    {
+                        self.set_actual_size();
+                    }
 
-                            ui.separator();
-                            if toolbar_icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, true)
-                                .on_hover_text("Rotate counterclockwise (Shift+R)")
-                                .clicked()
-                            {
-                                self.rotation = (self.rotation + 3) % 4;
-                                self.view.reset();
-                            }
-                            if toolbar_icon_button(ui, icons::ARROW_CLOCKWISE, true)
-                                .on_hover_text("Rotate clockwise (R)")
-                                .clicked()
-                            {
-                                self.rotation = (self.rotation + 1) % 4;
-                                self.view.reset();
-                            }
-                            if toolbar_icon_button(ui, icons::FLIP_HORIZONTAL, true)
-                                .on_hover_text("Flip horizontally (H)")
-                                .clicked()
-                            {
-                                self.flip_horizontal = !self.flip_horizontal;
-                            }
-                            if toolbar_icon_button(ui, icons::FLIP_VERTICAL, true)
-                                .on_hover_text("Flip vertically (V)")
-                                .clicked()
-                            {
-                                self.flip_vertical = !self.flip_vertical;
-                            }
+                    if layout.transforms {
+                        ui.separator();
+                        if toolbar_icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, has_image)
+                            .on_hover_text("Rotate counterclockwise (Shift+R)")
+                            .clicked()
+                        {
+                            self.rotate_counterclockwise();
+                        }
+                        if toolbar_icon_button(ui, icons::ARROW_CLOCKWISE, has_image)
+                            .on_hover_text("Rotate clockwise (R)")
+                            .clicked()
+                        {
+                            self.rotate_clockwise();
+                        }
+                        if toolbar_icon_button(ui, icons::FLIP_HORIZONTAL, has_image)
+                            .on_hover_text("Flip horizontally (H)")
+                            .clicked()
+                        {
+                            self.flip_horizontal = !self.flip_horizontal;
+                        }
+                        if toolbar_icon_button(ui, icons::FLIP_VERTICAL, has_image)
+                            .on_hover_text("Flip vertically (V)")
+                            .clicked()
+                        {
+                            self.flip_vertical = !self.flip_vertical;
+                        }
+                    }
 
-                            ui.separator();
-                            if ui
-                                .add_sized(
-                                    vec2(60.0, TOOLBAR_BUTTON_HEIGHT),
-                                    egui::Button::new(format!("{}  Info", icons::INFO))
-                                        .selected(self.show_info),
-                                )
-                                .on_hover_text("Image information (I)")
-                                .clicked()
-                            {
-                                self.show_info = !self.show_info;
-                            }
-                            if ui
-                                .add_sized(
-                                    vec2(94.0, TOOLBAR_BUTTON_HEIGHT),
-                                    egui::Button::new(format!("{}  Filmstrip", icons::FILM_STRIP))
-                                        .selected(self.show_filmstrip),
-                                )
-                                .on_hover_text("Toggle filmstrip (B)")
-                                .clicked()
-                            {
-                                self.show_filmstrip = !self.show_filmstrip;
-                            }
-                            if ui
-                                .add_sized(
-                                    vec2(70.0, TOOLBAR_BUTTON_HEIGHT),
-                                    egui::Button::new(if self.slideshow {
+                    if layout.info_and_filmstrip {
+                        ui.separator();
+                    }
+                    if layout.info_and_filmstrip
+                        && ui
+                            .add_enabled(
+                                has_image,
+                                egui::Button::new(if layout.labeled_toggles {
+                                    format!("{}  Info", icons::INFO)
+                                } else {
+                                    icons::INFO.to_owned()
+                                })
+                                .selected(self.show_info)
+                                .min_size(vec2(
+                                    if layout.labeled_toggles { 60.0 } else { 32.0 },
+                                    TOOLBAR_BUTTON_HEIGHT,
+                                )),
+                            )
+                            .on_hover_text("Image information (I)")
+                            .clicked()
+                    {
+                        self.show_info = !self.show_info;
+                    }
+                    if layout.info_and_filmstrip
+                        && ui
+                            .add_enabled(
+                                self.catalog.len() > 0,
+                                egui::Button::new(if layout.labeled_toggles {
+                                    format!("{}  Filmstrip", icons::FILM_STRIP)
+                                } else {
+                                    icons::FILM_STRIP.to_owned()
+                                })
+                                .selected(self.show_filmstrip)
+                                .min_size(vec2(
+                                    if layout.labeled_toggles { 94.0 } else { 32.0 },
+                                    TOOLBAR_BUTTON_HEIGHT,
+                                )),
+                            )
+                            .on_hover_text("Toggle filmstrip (B)")
+                            .clicked()
+                    {
+                        self.show_filmstrip = !self.show_filmstrip;
+                    }
+                    if layout.slideshow
+                        && ui
+                            .add_enabled(
+                                self.catalog.len() > 1,
+                                egui::Button::new(if layout.labeled_toggles {
+                                    if self.slideshow {
                                         format!("{}  Pause", icons::PAUSE)
                                     } else {
                                         format!("{}  Play", icons::PLAY)
+                                    }
+                                } else if self.slideshow {
+                                    icons::PAUSE.to_owned()
+                                } else {
+                                    icons::PLAY.to_owned()
+                                })
+                                .selected(self.slideshow)
+                                .min_size(vec2(
+                                    if layout.labeled_toggles { 70.0 } else { 32.0 },
+                                    TOOLBAR_BUTTON_HEIGHT,
+                                )),
+                            )
+                            .on_hover_text("Play or pause slideshow (Space)")
+                            .clicked()
+                    {
+                        self.toggle_slideshow();
+                    }
+                    if layout.fullscreen
+                        && toolbar_icon_button(ui, icons::CORNERS_OUT, true)
+                            .on_hover_text("Toggle fullscreen (F)")
+                            .clicked()
+                    {
+                        self.toggle_fullscreen(ui.ctx());
+                    }
+                    if layout.appearance
+                        && toolbar_icon_button(
+                            ui,
+                            if self.dark_mode {
+                                icons::SUN
+                            } else {
+                                icons::MOON
+                            },
+                            true,
+                        )
+                        .on_hover_text(if self.dark_mode {
+                            "Use light appearance (T)"
+                        } else {
+                            "Use dark appearance (T)"
+                        })
+                        .clicked()
+                    {
+                        self.toggle_appearance(ui.ctx());
+                    }
+                    let more_label = if layout.labeled_more {
+                        format!("{}  More", icons::DOTS_THREE)
+                    } else {
+                        icons::DOTS_THREE.to_owned()
+                    };
+                    ui.menu_button(more_label, |ui| {
+                        if ui
+                            .button(format!("{}  Open image…    Cmd+O", icons::FOLDER_OPEN))
+                            .clicked()
+                        {
+                            self.open_dialog();
+                            ui.close();
+                        }
+                        let recent_entries = self.recent_files.entries().to_vec();
+                        let mut selected_recent = None;
+                        let mut clear_recents = false;
+                        ui.menu_button(
+                            format!("{}  Open Recent", icons::CLOCK_COUNTER_CLOCKWISE),
+                            |ui| {
+                                if recent_entries.is_empty() {
+                                    ui.add_enabled(false, egui::Button::new("No recent images"));
+                                } else {
+                                    for path in &recent_entries {
+                                        let name =
+                                            path.file_name().unwrap_or_default().to_string_lossy();
+                                        let display_name = truncate_middle(&name, 36);
+                                        if ui
+                                            .button(format!("{}  {display_name}", icons::IMAGE))
+                                            .on_hover_text(path.display().to_string())
+                                            .clicked()
+                                        {
+                                            selected_recent = Some(path.clone());
+                                            ui.close();
+                                        }
+                                    }
+                                    ui.separator();
+                                    if ui
+                                        .button(format!("{}  Clear Recent", icons::BROOM))
+                                        .clicked()
+                                    {
+                                        clear_recents = true;
+                                        ui.close();
+                                    }
+                                }
+                            },
+                        );
+                        if clear_recents {
+                            self.recent_files.clear();
+                        }
+                        if let Some(path) = selected_recent {
+                            self.open(path, true);
+                        }
+                        if ui
+                            .button(format!(
+                                "{}  Reopen most recent    Cmd+Shift+O",
+                                icons::CLOCK_CLOCKWISE
+                            ))
+                            .clicked()
+                        {
+                            self.open_most_recent();
+                            ui.close();
+                        }
+
+                        ui.separator();
+                        ui.menu_button(format!("{}  View", icons::EYE), |ui| {
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!("{}  Zoom in    +", icons::PLUS)),
+                                )
+                                .clicked()
+                            {
+                                self.view.zoom_step(1.25);
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!("{}  Zoom out    −", icons::MINUS)),
+                                )
+                                .clicked()
+                            {
+                                self.view.zoom_step(0.8);
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!(
+                                        "{}  Fit to window    0",
+                                        icons::ARROWS_IN_SIMPLE
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                self.view.reset();
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new("1:1  Actual pixels    1"),
+                                )
+                                .clicked()
+                            {
+                                self.set_actual_size();
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!(
+                                        "{}  Image information    I",
+                                        icons::INFO
+                                    ))
+                                    .selected(self.show_info),
+                                )
+                                .clicked()
+                            {
+                                self.show_info = !self.show_info;
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    self.catalog.len() > 0,
+                                    egui::Button::new(format!(
+                                        "{}  Filmstrip    B",
+                                        icons::FILM_STRIP
+                                    ))
+                                    .selected(self.show_filmstrip),
+                                )
+                                .clicked()
+                            {
+                                self.show_filmstrip = !self.show_filmstrip;
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    self.catalog.len() > 1,
+                                    egui::Button::new(if self.slideshow {
+                                        format!("{}  Pause slideshow    Space", icons::PAUSE)
+                                    } else {
+                                        format!("{}  Play slideshow    Space", icons::PLAY)
                                     })
                                     .selected(self.slideshow),
                                 )
-                                .on_hover_text("Play or pause slideshow (Space)")
                                 .clicked()
                             {
-                                self.slideshow = !self.slideshow;
-                                self.last_slide = Instant::now();
+                                self.toggle_slideshow();
+                                ui.close();
                             }
-                            if toolbar_icon_button(ui, icons::CORNERS_OUT, true)
-                                .on_hover_text("Toggle fullscreen (F)")
+                            if ui
+                                .button(format!("{}  Fullscreen    F", icons::CORNERS_OUT))
                                 .clicked()
                             {
                                 self.toggle_fullscreen(ui.ctx());
+                                ui.close();
                             }
-                            if toolbar_icon_button(
-                                ui,
-                                if self.dark_mode {
-                                    icons::SUN
-                                } else {
-                                    icons::MOON
-                                },
-                                true,
-                            )
-                            .on_hover_text(if self.dark_mode {
-                                "Use light appearance (T)"
-                            } else {
-                                "Use dark appearance (T)"
-                            })
-                            .clicked()
+                            if ui
+                                .button(format!(
+                                    "{}  {} appearance    T",
+                                    if self.dark_mode {
+                                        icons::SUN
+                                    } else {
+                                        icons::MOON
+                                    },
+                                    if self.dark_mode { "Light" } else { "Dark" }
+                                ))
+                                .clicked()
                             {
                                 self.toggle_appearance(ui.ctx());
-                            }
-                            ui.menu_button(format!("{}  More", icons::DOTS_THREE), |ui| {
-                                let recent_entries = self.recent_files.entries().to_vec();
-                                let mut selected_recent = None;
-                                let mut clear_recents = false;
-                                ui.menu_button(
-                                    format!("{}  Open Recent", icons::CLOCK_COUNTER_CLOCKWISE),
-                                    |ui| {
-                                        if recent_entries.is_empty() {
-                                            ui.add_enabled(
-                                                false,
-                                                egui::Button::new("No recent images"),
-                                            );
-                                        } else {
-                                            for path in &recent_entries {
-                                                let name = path
-                                                    .file_name()
-                                                    .unwrap_or_default()
-                                                    .to_string_lossy();
-                                                if ui
-                                                    .button(format!("{}  {name}", icons::IMAGE))
-                                                    .on_hover_text(path.display().to_string())
-                                                    .clicked()
-                                                {
-                                                    selected_recent = Some(path.clone());
-                                                    ui.close();
-                                                }
-                                            }
-                                            ui.separator();
-                                            if ui
-                                                .button(format!("{}  Clear Recent", icons::BROOM))
-                                                .clicked()
-                                            {
-                                                clear_recents = true;
-                                                ui.close();
-                                            }
-                                        }
-                                    },
-                                );
-                                if clear_recents {
-                                    self.recent_files.clear();
-                                }
-                                if let Some(path) = selected_recent {
-                                    self.open(path, true);
-                                }
-                                if ui
-                                    .button(format!(
-                                        "{}  Reopen most recent    Cmd+Shift+O",
-                                        icons::CLOCK_CLOCKWISE
-                                    ))
-                                    .clicked()
-                                {
-                                    self.open_most_recent();
-                                    ui.close();
-                                }
-
-                                ui.separator();
-                                ui.menu_button(
-                                    format!("{}  Canvas background", icons::CHECKERBOARD),
-                                    |ui| {
-                                        for (background, label) in [
-                                            (CanvasBackground::Automatic, "Automatic"),
-                                            (CanvasBackground::Black, "Black"),
-                                            (CanvasBackground::White, "White"),
-                                            (CanvasBackground::Checkerboard, "Checkerboard"),
-                                        ] {
-                                            if ui
-                                                .selectable_label(
-                                                    self.canvas_background == background,
-                                                    label,
-                                                )
-                                                .clicked()
-                                            {
-                                                self.canvas_background = background;
-                                                ui.close();
-                                            }
-                                        }
-                                    },
-                                );
-                                ui.menu_button(
-                                    format!("{}  Slideshow timing", icons::TIMER),
-                                    |ui| {
-                                        for seconds in [2, 3, 5, 10] {
-                                            if ui
-                                                .selectable_label(
-                                                    self.slideshow_seconds == seconds,
-                                                    format!("{seconds} seconds"),
-                                                )
-                                                .clicked()
-                                            {
-                                                self.slideshow_seconds = seconds;
-                                                self.last_slide = Instant::now();
-                                                ui.close();
-                                            }
-                                        }
-                                    },
-                                );
-                                if ui
-                                    .button(format!(
-                                        "{}  Reset view and orientation    X",
-                                        icons::ARROWS_COUNTER_CLOCKWISE
-                                    ))
-                                    .clicked()
-                                {
-                                    self.reset_orientation();
-                                    ui.close();
-                                }
-
-                                ui.separator();
-                                if ui
-                                    .button(format!(
-                                        "{}  Copy file path    Cmd+Shift+C",
-                                        icons::COPY
-                                    ))
-                                    .clicked()
-                                {
-                                    self.copy_current_path(ui.ctx());
-                                    ui.close();
-                                }
-                                if ui
-                                    .button(format!(
-                                        "{}  Reveal in Finder    Cmd+Shift+R",
-                                        icons::FOLDER_OPEN
-                                    ))
-                                    .clicked()
-                                {
-                                    self.reveal_current();
-                                    ui.close();
-                                }
-                                if ui
-                                    .button(format!(
-                                        "{}  Save a copy...    Cmd+Shift+S",
-                                        icons::FLOPPY_DISK
-                                    ))
-                                    .clicked()
-                                {
-                                    self.save_current_copy();
-                                    ui.close();
-                                }
-                            });
-
-                            ui.separator();
-                            if let Some(image) = &self.current {
-                                let name =
-                                    image.path.file_name().unwrap_or_default().to_string_lossy();
-                                ui.label(RichText::new(name).strong())
-                                    .on_hover_text(image.path.display().to_string());
-                            }
-
-                            if self.catalog.len() > 0 {
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(format!(
-                                            "{} / {}",
-                                            self.catalog.position() + 1,
-                                            self.catalog.len()
-                                        ));
-                                    },
-                                );
+                                ui.close();
                             }
                         });
+                        ui.menu_button(format!("{}  Transform", icons::ARROWS_CLOCKWISE), |ui| {
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!(
+                                        "{}  Rotate counterclockwise    Shift+R",
+                                        icons::ARROW_COUNTER_CLOCKWISE
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                self.rotate_counterclockwise();
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!(
+                                        "{}  Rotate clockwise    R",
+                                        icons::ARROW_CLOCKWISE
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                self.rotate_clockwise();
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!(
+                                        "{}  Flip horizontally    H",
+                                        icons::FLIP_HORIZONTAL
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                self.flip_horizontal = !self.flip_horizontal;
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!(
+                                        "{}  Flip vertically    V",
+                                        icons::FLIP_VERTICAL
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                self.flip_vertical = !self.flip_vertical;
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui
+                                .add_enabled(
+                                    has_image,
+                                    egui::Button::new(format!(
+                                        "{}  Reset view and orientation    X",
+                                        icons::ARROWS_COUNTER_CLOCKWISE
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                self.reset_orientation();
+                                ui.close();
+                            }
+                        });
+                        ui.menu_button(
+                            format!("{}  Canvas background", icons::CHECKERBOARD),
+                            |ui| {
+                                for (background, label) in [
+                                    (CanvasBackground::Automatic, "Automatic"),
+                                    (CanvasBackground::Black, "Black"),
+                                    (CanvasBackground::White, "White"),
+                                    (CanvasBackground::Checkerboard, "Checkerboard"),
+                                ] {
+                                    if ui
+                                        .selectable_label(
+                                            self.canvas_background == background,
+                                            label,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.canvas_background = background;
+                                        ui.close();
+                                    }
+                                }
+                            },
+                        );
+                        ui.menu_button(format!("{}  Slideshow timing", icons::TIMER), |ui| {
+                            for seconds in [2, 3, 5, 10] {
+                                if ui
+                                    .selectable_label(
+                                        self.slideshow_seconds == seconds,
+                                        format!("{seconds} seconds"),
+                                    )
+                                    .clicked()
+                                {
+                                    self.slideshow_seconds = seconds;
+                                    self.last_slide = Instant::now();
+                                    ui.close();
+                                }
+                            }
+                        });
+                        ui.separator();
+                        if ui
+                            .add_enabled(
+                                has_image,
+                                egui::Button::new(format!(
+                                    "{}  Copy file path    Cmd+Shift+C",
+                                    icons::COPY
+                                )),
+                            )
+                            .clicked()
+                        {
+                            self.copy_current_path(ui.ctx());
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                has_image,
+                                egui::Button::new(format!(
+                                    "{}  Reveal in Finder    Cmd+Shift+R",
+                                    icons::FOLDER_OPEN
+                                )),
+                            )
+                            .clicked()
+                        {
+                            self.reveal_current();
+                            ui.close();
+                        }
+                        if ui
+                            .add_enabled(
+                                has_image,
+                                egui::Button::new(format!(
+                                    "{}  Save a copy...    Cmd+Shift+S",
+                                    icons::FLOPPY_DISK
+                                )),
+                            )
+                            .clicked()
+                        {
+                            self.save_current_copy();
+                            ui.close();
+                        }
                     });
+
+                    if layout.filename {
+                        ui.separator();
+                    }
+                    if layout.filename
+                        && let Some(image) = &self.current
+                    {
+                        let name = image.path.file_name().unwrap_or_default().to_string_lossy();
+                        ui.label(RichText::new(truncate_middle(&name, 32)).strong())
+                            .on_hover_text(image.path.display().to_string());
+                    }
+
+                    if layout.filename && self.catalog.len() > 0 {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(format!(
+                                "{} / {}",
+                                self.catalog.position() + 1,
+                                self.catalog.len()
+                            ));
+                        });
+                    }
+                });
             });
     }
 
@@ -968,15 +1315,24 @@ impl EagleApp {
         } else {
             Color32::from_rgb(236, 237, 240)
         };
-        let items = self.catalog.window(18);
+        let compact = root.available_height() < 520.0;
+        let panel_height = if compact { 82.0 } else { 108.0 };
+        let card_size = if compact {
+            vec2(68.0, 64.0)
+        } else {
+            vec2(86.0, 88.0)
+        };
+        let radius = ((root.available_width() / card_size.x).ceil() as usize + 2).min(24);
+        let items = self.catalog.window(radius);
         let current = self.catalog.position();
+        let scroll_to_current = self.scroll_filmstrip_to_current;
         let mut selected = None;
         egui::Panel::bottom("filmstrip")
-            .exact_size(108.0)
+            .exact_size(panel_height)
             .frame(
                 egui::Frame::new()
                     .fill(panel_fill)
-                    .inner_margin(egui::Margin::symmetric(10, 8)),
+                    .inner_margin(egui::Margin::symmetric(8, if compact { 6 } else { 8 })),
             )
             .show(root, |ui| {
                 egui::ScrollArea::horizontal()
@@ -985,7 +1341,7 @@ impl EagleApp {
                         ui.horizontal(|ui| {
                             for (index, path) in items {
                                 let (rect, response) =
-                                    ui.allocate_exact_size(vec2(86.0, 88.0), Sense::click());
+                                    ui.allocate_exact_size(card_size, Sense::click());
                                 let selected_now = index == current;
                                 ui.painter().rect_filled(
                                     rect,
@@ -1036,16 +1392,13 @@ impl EagleApp {
                                     );
                                 }
                                 let name = path.file_name().unwrap_or_default().to_string_lossy();
-                                let short_name = if name.chars().count() > 12 {
-                                    format!("{}…", name.chars().take(11).collect::<String>())
-                                } else {
-                                    name.into_owned()
-                                };
+                                let short_name =
+                                    truncate_middle(&name, if compact { 9 } else { 12 });
                                 ui.painter().text(
                                     Pos2::new(rect.center().x, rect.max.y - 10.0),
                                     egui::Align2::CENTER_CENTER,
                                     short_name,
-                                    FontId::proportional(10.5),
+                                    FontId::proportional(if compact { 9.5 } else { 10.5 }),
                                     if selected_now || self.dark_mode {
                                         Color32::from_gray(225)
                                     } else {
@@ -1055,10 +1408,14 @@ impl EagleApp {
                                 if response.clicked() {
                                     selected = Some(index);
                                 }
+                                if selected_now && scroll_to_current {
+                                    response.scroll_to_me(Some(egui::Align::Center));
+                                }
                             }
                         });
                     });
             });
+        self.scroll_filmstrip_to_current = false;
         if let Some(index) = selected
             && self.catalog.set_position(index)
         {
@@ -1346,14 +1703,16 @@ impl EagleApp {
                         } else if self.detail_loading {
                             "Building SSD-backed full detail…".into()
                         } else if let Some(error) = &self.detail_error {
-                            format!("Preview only · {error}")
+                            format!("Preview only · {}", truncate_end(error, 120))
                         } else {
                             "Instant preview · zoom in for full detail".into()
                         };
                         let text_color = Color32::from_gray(225);
+                        let file_name =
+                            image.path.file_name().unwrap_or_default().to_string_lossy();
                         let info_text = format!(
                             "{}\n{} × {} px  ·  {}\n{}  ·  preview {} × {}\n{}",
-                            image.path.file_name().unwrap_or_default().to_string_lossy(),
+                            truncate_middle(&file_name, 100),
                             image.original_size[0],
                             image.original_size[1],
                             image.format,
@@ -1362,7 +1721,8 @@ impl EagleApp {
                             image.preview_size[1],
                             detail_status,
                         );
-                        let card_width = (viewport.width() - 32.0).clamp(180.0, 460.0);
+                        let card_margin = if viewport.width() < 600.0 { 12.0 } else { 16.0 };
+                        let card_width = (viewport.width() - card_margin * 2.0).clamp(140.0, 460.0);
                         let text_width = (card_width - 28.0).max(1.0);
                         let galley = painter.layout(
                             info_text,
@@ -1371,7 +1731,7 @@ impl EagleApp {
                             text_width,
                         );
                         let info_rect = Rect::from_min_size(
-                            viewport.left_top() + vec2(16.0, 16.0),
+                            viewport.left_top() + vec2(card_margin, card_margin),
                             vec2(card_width, galley.size().y + 26.0),
                         );
                         painter.rect_filled(
@@ -1382,19 +1742,19 @@ impl EagleApp {
                         painter.galley(info_rect.min + vec2(14.0, 13.0), galley, text_color);
                     }
                 } else if self.error.is_none() {
-                    painter.text(
-                        viewport.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "Drop an image here\n\nor press Open…",
-                        FontId::proportional(20.0),
+                    paint_centered_message(
+                        &painter,
+                        viewport,
+                        format!("{}\n\nDrop an image here or press Open…", icons::IMAGE),
+                        FontId::proportional(if viewport.width() < 520.0 { 16.0 } else { 20.0 }),
                         secondary_text,
                     );
                 }
 
                 if self.loading {
                     painter.text(
-                        viewport.right_top() + Vec2::new(-16.0, 16.0),
-                        egui::Align2::RIGHT_TOP,
+                        viewport.right_bottom() + Vec2::new(-14.0, -14.0),
+                        egui::Align2::RIGHT_BOTTOM,
                         "Decoding preview…",
                         FontId::proportional(13.0),
                         Color32::from_rgb(235, 122, 131),
@@ -1402,7 +1762,8 @@ impl EagleApp {
                 }
                 if self.detail_loading {
                     painter.text(
-                        viewport.right_bottom() + Vec2::new(-16.0, -14.0),
+                        viewport.right_bottom()
+                            + Vec2::new(-14.0, if self.loading { -34.0 } else { -14.0 }),
                         egui::Align2::RIGHT_BOTTOM,
                         "Preparing full detail on SSD…",
                         FontId::proportional(12.0),
@@ -1410,10 +1771,14 @@ impl EagleApp {
                     );
                 }
                 if let Some(error) = &self.error {
-                    painter.text(
-                        viewport.center(),
-                        egui::Align2::CENTER_CENTER,
-                        format!("Could not open image\n\n{error}"),
+                    paint_centered_message(
+                        &painter,
+                        viewport,
+                        format!(
+                            "{}  Could not open image\n\n{}",
+                            icons::WARNING,
+                            truncate_end(error, 320)
+                        ),
                         FontId::proportional(16.0),
                         Color32::from_rgb(245, 130, 130),
                     );
@@ -1457,7 +1822,7 @@ impl eframe::App for EagleApp {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         if self.screenshot_path.is_some() && !self.screenshot_requested {
-            if self.current.is_some() && !self.loading {
+            if (self.current.is_some() && !self.loading) || self.error.is_some() {
                 self.screenshot_settle_frames = self.screenshot_settle_frames.saturating_add(1);
                 if self.screenshot_settle_frames >= 8 {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
@@ -1496,5 +1861,33 @@ mod tests {
         assert!(viewport_zoom_factor(1.0, vec2(0.0, -14.0)).unwrap() < 1.0);
         assert_eq!(viewport_zoom_factor(1.25, Vec2::ZERO), Some(1.25));
         assert_eq!(viewport_zoom_factor(1.0, Vec2::ZERO), None);
+    }
+
+    #[test]
+    fn toolbar_reveals_secondary_controls_only_when_they_fit() {
+        let minimum = ToolbarLayout::for_width(460.0);
+        assert!(!minimum.brand_text);
+        assert!(!minimum.transforms);
+        assert!(!minimum.info_and_filmstrip);
+        assert!(!minimum.labeled_more);
+
+        let laptop = ToolbarLayout::for_width(1_000.0);
+        assert!(laptop.brand_text);
+        assert!(laptop.info_and_filmstrip);
+        assert!(laptop.fullscreen);
+        assert!(!laptop.transforms);
+
+        let wide = ToolbarLayout::for_width(1_600.0);
+        assert!(wide.transforms);
+        assert!(wide.labeled_toggles);
+        assert!(wide.filename);
+    }
+
+    #[test]
+    fn long_labels_are_bounded_without_breaking_unicode() {
+        let shortened = truncate_middle("a-very-long-📷-photograph-name.arw", 14);
+        assert!(shortened.chars().count() <= 14);
+        assert!(shortened.contains('…'));
+        assert_eq!(truncate_end("short", 10), "short");
     }
 }
