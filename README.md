@@ -29,7 +29,7 @@ Eagle Viewer follows the current macOS appearance on launch. Press `T` or use th
 - Reduced-IDCT JPEG previews and row-streamed PNG previews capped at 4096 pixels
 - Lazy, SSD-backed full-resolution rasters with visible 512-pixel GPU tiles
 - Latest-request-first background decoding with stale-result rejection
-- Neighbor prefetch and a byte-bounded 512 MiB CPU/GPU preview cache
+- Immediate previous/current/next preview working set with a byte-bounded 512 MiB CPU/GPU cache
 - Folder filmstrip, slideshow, image information, zoom, pan, rotate and flip
 - Embedded-preview-first camera RAW support, including Sony ARW
 - macOS-native Quick Look fallback for formats such as HEIC, AVIF, PSD and SVG
@@ -99,7 +99,7 @@ cargo run --release -- "/path/to/image.jpg"
 
 ## Performance model
 
-The UI thread never performs image decoding. A 4096-pixel preview is produced first, adjacent images are prefetched, and full detail is built only when zoom requires more pixels. Huge JPEG and non-interlaced PNG images are decoded into temporary memory-mapped files so the operating system can page data through the SSD. Only visible tiles are uploaded to the GPU.
+The UI thread never performs image decoding. A 4096-pixel preview is produced first, and exactly the immediate previous and next reduced previews are prefetched around the current image. This three-image working set makes arrow-key navigation immediate without decoding three full-resolution images. Full detail remains current-image-only and is built only when zoom requires more pixels. Huge JPEG and non-interlaced PNG images are decoded into temporary memory-mapped files so the operating system can page data through the SSD. Only visible tiles are uploaded to the GPU.
 
 On the development machine, the included benchmark path measured a 32,000 x 2,000 JPEG at approximately 119 ms for its first 4096-pixel preview and 403 ms for the full 183 MiB SSD-backed raster. Hardware, storage, codec and image content all affect results.
 

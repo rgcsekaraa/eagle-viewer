@@ -128,6 +128,7 @@ impl EagleApp {
         initial_path: Option<PathBuf>,
         screenshot_path: Option<PathBuf>,
         forced_dark_mode: Option<bool>,
+        screenshot_info: bool,
     ) -> Self {
         let mut fonts = egui::FontDefinitions::default();
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
@@ -169,7 +170,7 @@ impl EagleApp {
             rotation: 0,
             flip_horizontal: false,
             flip_vertical: false,
-            show_info: false,
+            show_info: screenshot_info,
             show_filmstrip: true,
             slideshow: false,
             dark_mode,
@@ -1114,32 +1115,36 @@ impl EagleApp {
                         } else {
                             "Instant preview · zoom in for full detail".into()
                         };
+                        let text_color = Color32::from_gray(225);
+                        let info_text = format!(
+                            "{}\n{} × {} px  ·  {}\n{}  ·  preview {} × {}\n{}",
+                            image.path.file_name().unwrap_or_default().to_string_lossy(),
+                            image.original_size[0],
+                            image.original_size[1],
+                            image.format,
+                            human_bytes(file_size),
+                            image.preview_size[0],
+                            image.preview_size[1],
+                            detail_status,
+                        );
+                        let card_width = (viewport.width() - 32.0).clamp(180.0, 460.0);
+                        let text_width = (card_width - 28.0).max(1.0);
+                        let galley = painter.layout(
+                            info_text,
+                            FontId::monospace(12.0),
+                            text_color,
+                            text_width,
+                        );
                         let info_rect = Rect::from_min_size(
                             viewport.left_top() + vec2(16.0, 16.0),
-                            vec2(290.0, 126.0),
+                            vec2(card_width, galley.size().y + 26.0),
                         );
                         painter.rect_filled(
                             info_rect,
                             9.0,
                             Color32::from_rgba_unmultiplied(15, 17, 22, 225),
                         );
-                        painter.text(
-                            info_rect.min + vec2(14.0, 13.0),
-                            egui::Align2::LEFT_TOP,
-                            format!(
-                                "{}\n{} × {} px  ·  {}\n{}  ·  preview {} × {}\n{}",
-                                image.path.file_name().unwrap_or_default().to_string_lossy(),
-                                image.original_size[0],
-                                image.original_size[1],
-                                image.format,
-                                human_bytes(file_size),
-                                image.preview_size[0],
-                                image.preview_size[1],
-                                detail_status,
-                            ),
-                            FontId::monospace(12.0),
-                            Color32::from_gray(225),
-                        );
+                        painter.galley(info_rect.min + vec2(14.0, 13.0), galley, text_color);
                     }
                 } else if self.error.is_none() {
                     painter.text(

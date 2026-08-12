@@ -4,6 +4,12 @@ All notable changes to Eagle Viewer will be documented in this file. The project
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-12
+
+### Fixed
+
+- Made the image-information card responsive and dynamically sized so long filenames and full-detail status text wrap without overflowing.
+
 ## [0.1.1] - 2026-08-12
 
 ### Added
@@ -32,6 +38,7 @@ All notable changes to Eagle Viewer will be documented in this file. The project
 - Camera RAW embedded previews, including Sony ARW.
 - Native macOS fallback, folder prefetch, filmstrip and slideshow.
 
-[Unreleased]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rgcsekaraa/eagle-viewer/releases/tag/v0.1.0

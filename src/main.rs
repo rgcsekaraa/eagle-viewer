@@ -55,25 +55,29 @@ fn main() -> eframe::Result {
     }
     let mut screenshot_path = None;
     let mut forced_dark_mode = None;
+    let mut screenshot_info = false;
     let initial_path = if first_argument.as_deref() == Some(std::ffi::OsStr::new("--screenshot")) {
         let Some(output) = arguments.next().map(PathBuf::from) else {
             eprintln!(
-                "usage: eagle-viewer --screenshot /path/to/output.png /path/to/image [light|dark]"
+                "usage: eagle-viewer --screenshot /path/to/output.png /path/to/image [light|dark] [info]"
             );
             return Ok(());
         };
         let Some(image) = arguments.next().map(PathBuf::from) else {
             eprintln!(
-                "usage: eagle-viewer --screenshot /path/to/output.png /path/to/image [light|dark]"
+                "usage: eagle-viewer --screenshot /path/to/output.png /path/to/image [light|dark] [info]"
             );
             return Ok(());
         };
         screenshot_path = Some(output);
-        forced_dark_mode = match arguments.next().as_deref() {
-            Some(value) if value == std::ffi::OsStr::new("light") => Some(false),
-            Some(value) if value == std::ffi::OsStr::new("dark") => Some(true),
-            _ => None,
-        };
+        for option in arguments {
+            match option.as_os_str() {
+                value if value == std::ffi::OsStr::new("light") => forced_dark_mode = Some(false),
+                value if value == std::ffi::OsStr::new("dark") => forced_dark_mode = Some(true),
+                value if value == std::ffi::OsStr::new("info") => screenshot_info = true,
+                _ => {}
+            }
+        }
         Some(image)
     } else {
         first_argument.map(PathBuf::from)
@@ -108,6 +112,7 @@ fn main() -> eframe::Result {
                 initial_path,
                 screenshot_path,
                 forced_dark_mode,
+                screenshot_info,
             )))
         }),
     )
