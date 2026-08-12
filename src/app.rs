@@ -181,6 +181,15 @@ fn paint_checkerboard(painter: &egui::Painter, rect: Rect, dark_mode: bool) {
     }
 }
 
+fn eagle_red(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        Color32::from_rgb(235, 58, 72)
+    } else {
+        // Red Hat's vivid red direction stays crisp against the light graphite UI.
+        Color32::from_rgb(238, 0, 0)
+    }
+}
+
 fn apply_appearance(ctx: &egui::Context, dark_mode: bool) {
     let mut visuals = if dark_mode {
         egui::Visuals::dark()
@@ -197,13 +206,18 @@ fn apply_appearance(ctx: &egui::Context, dark_mode: bool) {
         visuals.panel_fill = Color32::from_rgb(244, 244, 246);
         visuals.extreme_bg_color = Color32::from_rgb(222, 223, 227);
         visuals.widgets.inactive.bg_fill = Color32::from_rgb(255, 255, 255);
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(255, 226, 230);
-        visuals.widgets.active.bg_fill = Color32::from_rgb(221, 48, 63);
+        visuals.widgets.hovered.bg_fill = Color32::from_rgb(255, 226, 226);
+        visuals.widgets.active.bg_fill = eagle_red(false);
+        visuals.widgets.active.fg_stroke.color = Color32::WHITE;
     }
     visuals.window_fill = visuals.panel_fill;
-    visuals.selection.bg_fill = Color32::from_rgb(202, 32, 48);
+    visuals.selection.bg_fill = if dark_mode {
+        Color32::from_rgb(202, 32, 48)
+    } else {
+        eagle_red(false)
+    };
     visuals.selection.stroke.color = Color32::WHITE;
-    visuals.widgets.hovered.bg_stroke.color = Color32::from_rgb(231, 58, 72);
+    visuals.widgets.hovered.bg_stroke.color = eagle_red(dark_mode);
 
     ctx.set_theme(if dark_mode {
         egui::Theme::Dark
@@ -761,7 +775,7 @@ impl EagleApp {
                         ui.label(
                             RichText::new("EAGLE")
                                 .strong()
-                                .color(Color32::from_rgb(235, 58, 72)),
+                                .color(eagle_red(self.dark_mode)),
                         );
                     }
                     ui.separator();
@@ -1347,7 +1361,11 @@ impl EagleApp {
                                     rect,
                                     7.0,
                                     if selected_now {
-                                        Color32::from_rgb(151, 30, 43)
+                                        if self.dark_mode {
+                                            Color32::from_rgb(151, 30, 43)
+                                        } else {
+                                            eagle_red(false)
+                                        }
                                     } else if response.hovered() {
                                         if self.dark_mode {
                                             Color32::from_rgb(39, 42, 50)
