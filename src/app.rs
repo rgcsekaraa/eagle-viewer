@@ -1714,22 +1714,22 @@ impl EagleApp {
                             .unwrap_or(0);
                         let detail_status = if let Some(detail) = &self.detail {
                             format!(
-                                "Full detail ready · {:.0} ms · {} tiles resident",
+                                "Full detail ready in {:.0} ms, {} tiles resident",
                                 detail.elapsed.as_secs_f64() * 1000.0,
                                 self.tiles.len()
                             )
                         } else if self.detail_loading {
                             "Building SSD-backed full detail…".into()
                         } else if let Some(error) = &self.detail_error {
-                            format!("Preview only · {}", truncate_end(error, 120))
+                            format!("Preview only: {}", truncate_end(error, 120))
                         } else {
-                            "Instant preview · zoom in for full detail".into()
+                            "Instant preview\nZoom in for full detail".into()
                         };
                         let text_color = Color32::from_gray(225);
                         let file_name =
                             image.path.file_name().unwrap_or_default().to_string_lossy();
                         let info_text = format!(
-                            "{}\n{} × {} px  ·  {}\n{}  ·  preview {} × {}\n{}",
+                            "{}\n{} × {} px    {}\nFile size {}    Preview {} × {}\n{}",
                             truncate_middle(&file_name, 100),
                             image.original_size[0],
                             image.original_size[1],

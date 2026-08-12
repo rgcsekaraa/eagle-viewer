@@ -219,7 +219,7 @@ impl CardScoutApp {
 
         let selected_label = self
             .selected()
-            .map(|state| format!("{}  ·  {}", state.volume.name, state.volume.size))
+            .map(|state| format!("{} ({})", state.volume.name, state.volume.size))
             .unwrap_or_else(|| "No removable disks found".into());
 
         ui.add_enabled_ui(!self.busy && !self.snapshot.volumes.is_empty(), |ui| {
@@ -255,7 +255,7 @@ impl CardScoutApp {
                         ui.label(RichText::new(&state.volume.name).size(18.0).strong());
                         ui.label(
                             RichText::new(format!(
-                                "{}  ·  {}  ·  {} free  ·  {}",
+                                "{}    {}    {} free    {}",
                                 state.volume.device,
                                 state.volume.filesystem,
                                 state.volume.free_space,
@@ -325,7 +325,7 @@ impl CardScoutApp {
                         ui.label(RichText::new("●").color(WARNING));
                         ui.label(RichText::new(&holder.command).size(17.0).strong());
                         ui.label(
-                            RichText::new(format!("PID {}  ·  {}", holder.pid, holder.user))
+                            RichText::new(format!("PID {}    {}", holder.pid, holder.user))
                                 .monospace()
                                 .small()
                                 .color(Color32::from_gray(140)),
