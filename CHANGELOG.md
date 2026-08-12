@@ -4,6 +4,24 @@ All notable changes to Eagle Viewer will be documented in this file. The project
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-12
+
+### Added
+
+- Adaptive toolbar layouts for compact, laptop, desktop, and wide windows; essential controls remain visible while secondary actions move into structured View and Transform menus.
+- Responsive filmstrip sizing for short windows and automatic centering of the current thumbnail.
+- Multi-size screenshot support for responsive visual regression checks.
+
+### Fixed
+
+- Removed horizontal toolbar overflow and scrolling at narrow window sizes.
+- Prevented a previous image from remaining visible while a newly selected uncached image loads.
+- Rejected unsupported dropped/opened files and unsupported recent-history entries.
+- Disabled image-only and slideshow actions when their required content is unavailable.
+- Wrapped long viewer errors, bounded long filenames and decoder statuses, and kept information cards inside compact viewports.
+- Canonicalized opened paths and invalidated an explicitly reopened image so externally edited files refresh.
+- Disabled unmanaged AppKit window restoration so a stale forced-quit state cannot launch Eagle without a visible viewer window.
+
 ## [0.2.1] - 2026-08-12
 
 ### Changed
@@ -51,7 +69,8 @@ All notable changes to Eagle Viewer will be documented in this file. The project
 - Camera RAW embedded previews, including Sony ARW.
 - Native macOS fallback, folder prefetch, filmstrip and slideshow.
 
-[Unreleased]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.0...v0.1.1

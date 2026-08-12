@@ -36,6 +36,7 @@ Eagle Viewer follows the current macOS appearance on launch. Press `T` or use th
 - macOS-native Quick Look fallback for formats such as HEIC, AVIF, PSD and SVG
 - Dark and light appearances with a consistent red/graphite identity
 - Font-independent vector toolbar icons and immediate tooltips
+- Adaptive compact-to-wide layouts with overflow-free controls down to a 480 × 320 window
 - Complete keyboard access for viewer and file actions
 
 ## Format support
