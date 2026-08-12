@@ -4,7 +4,14 @@ All notable changes to Eagle Viewer will be documented in this file. The project
 
 ## [Unreleased]
 
-## [0.1.2] - 2026-08-12
+## [0.2.0] - 2026-08-12
+
+### Added
+
+- Persistent Open Recent history for up to 12 images, with missing-file cleanup, clear history, and `Cmd+Shift+O` access.
+- Automatic, black, white, and checkerboard canvas backgrounds.
+- Configurable 2, 3, 5, or 10 second slideshow timing.
+- A single action and `X` shortcut to reset view rotation and flips.
 
 ### Fixed
 
@@ -38,7 +45,7 @@ All notable changes to Eagle Viewer will be documented in this file. The project
 - Camera RAW embedded previews, including Sony ARW.
 - Native macOS fallback, folder prefetch, filmstrip and slideshow.
 
-[Unreleased]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.1...v0.1.2
+[Unreleased]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rgcsekaraa/eagle-viewer/releases/tag/v0.1.0

@@ -30,7 +30,8 @@ Eagle Viewer follows the current macOS appearance on launch. Press `T` or use th
 - Lazy, SSD-backed full-resolution rasters with visible 512-pixel GPU tiles
 - Latest-request-first background decoding with stale-result rejection
 - Immediate previous/current/next preview working set with a byte-bounded 512 MiB CPU/GPU cache
-- Folder filmstrip, slideshow, image information, zoom, pan, rotate and flip
+- Persistent Open Recent history, folder filmstrip, timed slideshow and image information
+- Zoom, pointer-centred pan, rotate, flip, reset and transparency-friendly canvas backgrounds
 - Embedded-preview-first camera RAW support, including Sony ARW
 - macOS-native Quick Look fallback for formats such as HEIC, AVIF, PSD and SVG
 - Dark and light appearances with a consistent red/graphite identity
@@ -76,6 +77,7 @@ cargo run --release -- "/path/to/image.jpg"
 | Shortcut | Action |
 |---|---|
 | `Cmd+O` | Open an image |
+| `Cmd+Shift+O` | Reopen the most recent image |
 | `Left Arrow` / `Right Arrow` | Previous / next image |
 | `Home` / `End` | First / last image |
 | `0` | Fit image to the window |
@@ -93,6 +95,9 @@ cargo run --release -- "/path/to/image.jpg"
 | `F` | Toggle fullscreen |
 | `Escape` | Leave fullscreen |
 | `T` | Toggle light/dark appearance |
+| `G` | Cycle automatic, black, white and checkerboard canvas backgrounds |
+| `X` | Reset view, rotation and flips |
+| `[` / `]` | Slower / faster slideshow timing |
 | `Cmd+Shift+C` | Copy the current file path |
 | `Cmd+Shift+R` | Reveal the current file in Finder |
 | `Cmd+Shift+S` | Save a copy of the current file |

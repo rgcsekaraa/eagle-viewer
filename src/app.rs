@@ -17,6 +17,7 @@ use crate::{
     catalog::Catalog,
     detail::{DetailImage, DetailLoader},
     loader::{DecodedImage, ImageLoader, RequestKind},
+    recent::RecentFiles,
     view::ViewTransform,
 };
 
@@ -24,6 +25,25 @@ const CACHE_BUDGET: usize = 512 * 1024 * 1024;
 const TILE_SIZE: u32 = 512;
 const MAX_GPU_TILES: usize = 256;
 const TOOLBAR_BUTTON_HEIGHT: f32 = 34.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CanvasBackground {
+    Automatic,
+    Black,
+    White,
+    Checkerboard,
+}
+
+impl CanvasBackground {
+    fn next(self) -> Self {
+        match self {
+            Self::Automatic => Self::Black,
+            Self::Black => Self::White,
+            Self::White => Self::Checkerboard,
+            Self::Checkerboard => Self::Automatic,
+        }
+    }
+}
 
 fn toolbar_icon_button(ui: &mut egui::Ui, icon: &'static str, enabled: bool) -> Response {
     ui.add_enabled(
@@ -50,6 +70,30 @@ fn viewport_zoom_factor(gesture_zoom: f32, scroll: Vec2) -> Option<f32> {
         scroll.x
     };
     (wheel_delta.abs() > f32::EPSILON).then(|| (wheel_delta * 0.01).clamp(-1.0, 1.0).exp())
+}
+
+fn paint_checkerboard(painter: &egui::Painter, rect: Rect, dark_mode: bool) {
+    let tile = 40.0;
+    let colors = if dark_mode {
+        [Color32::from_rgb(28, 30, 35), Color32::from_rgb(43, 46, 52)]
+    } else {
+        [
+            Color32::from_rgb(222, 224, 229),
+            Color32::from_rgb(245, 246, 248),
+        ]
+    };
+    let columns = (rect.width() / tile).ceil() as usize;
+    let rows = (rect.height() / tile).ceil() as usize;
+    for row in 0..rows {
+        for column in 0..columns {
+            let min = rect.min + vec2(column as f32 * tile, row as f32 * tile);
+            painter.rect_filled(
+                Rect::from_min_size(min, vec2(tile, tile)).intersect(rect),
+                0.0,
+                colors[(row + column) % 2],
+            );
+        }
+    }
 }
 
 fn apply_appearance(ctx: &egui::Context, dark_mode: bool) {
@@ -94,6 +138,7 @@ pub struct EagleApp {
     loader: ImageLoader,
     detail_loader: DetailLoader,
     catalog: Catalog,
+    recent_files: RecentFiles,
     cache: PreviewCache,
     current: Option<Arc<DecodedImage>>,
     texture: Option<TextureHandle>,
@@ -112,6 +157,8 @@ pub struct EagleApp {
     show_info: bool,
     show_filmstrip: bool,
     slideshow: bool,
+    slideshow_seconds: u64,
+    canvas_background: CanvasBackground,
     dark_mode: bool,
     last_slide: Instant,
     fullscreen: bool,
@@ -155,6 +202,7 @@ impl EagleApp {
             loader: ImageLoader::new(),
             detail_loader: DetailLoader::new(),
             catalog: Catalog::default(),
+            recent_files: RecentFiles::load(),
             cache: PreviewCache::new(CACHE_BUDGET),
             current: None,
             texture: None,
@@ -173,6 +221,8 @@ impl EagleApp {
             show_info: screenshot_info,
             show_filmstrip: true,
             slideshow: false,
+            slideshow_seconds: 3,
+            canvas_background: CanvasBackground::Automatic,
             dark_mode,
             last_slide: Instant::now(),
             fullscreen: false,
@@ -183,7 +233,7 @@ impl EagleApp {
             screenshot_settle_frames: 0,
         };
         if let Some(path) = initial_path.filter(|path| path.is_file()) {
-            app.open(path);
+            app.open(path, app.screenshot_path.is_none());
         }
         app
     }
@@ -223,7 +273,10 @@ impl EagleApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
-    fn open(&mut self, path: PathBuf) {
+    fn open(&mut self, path: PathBuf, remember: bool) {
+        if remember {
+            self.recent_files.record(&path);
+        }
         self.catalog = Catalog::around(&path);
         self.load_current();
     }
@@ -366,8 +419,36 @@ impl EagleApp {
             .set_title("Open any image")
             .pick_file()
         {
-            self.open(path);
+            self.open(path, true);
         }
+    }
+
+    fn open_most_recent(&mut self) {
+        if let Some(path) = self.recent_files.most_recent().map(ToOwned::to_owned) {
+            self.open(path, true);
+        }
+    }
+
+    fn reset_orientation(&mut self) {
+        self.rotation = 0;
+        self.flip_horizontal = false;
+        self.flip_vertical = false;
+        self.view.reset();
+    }
+
+    fn adjust_slideshow_speed(&mut self, faster: bool) {
+        const SPEEDS: &[u64] = &[2, 3, 5, 10];
+        let current = SPEEDS
+            .iter()
+            .position(|seconds| *seconds == self.slideshow_seconds)
+            .unwrap_or(1);
+        let next = if faster {
+            current.saturating_sub(1)
+        } else {
+            (current + 1).min(SPEEDS.len() - 1)
+        };
+        self.slideshow_seconds = SPEEDS[next];
+        self.last_slide = Instant::now();
     }
 
     fn copy_current_path(&self, ctx: &egui::Context) {
@@ -410,13 +491,16 @@ impl EagleApp {
                 .find(|path| path.is_file())
         });
         if let Some(path) = dropped {
-            self.open(path);
+            self.open(path, true);
         }
 
         let (command, shift) = ctx.input(|input| (input.modifiers.command, input.modifiers.shift));
 
-        if command && ctx.input(|input| input.key_pressed(egui::Key::O)) {
+        if command && !shift && ctx.input(|input| input.key_pressed(egui::Key::O)) {
             self.open_dialog();
+        }
+        if command && shift && ctx.input(|input| input.key_pressed(egui::Key::O)) {
+            self.open_most_recent();
         }
         if command && shift && ctx.input(|input| input.key_pressed(egui::Key::C)) {
             self.copy_current_path(ctx);
@@ -474,6 +558,18 @@ impl EagleApp {
         }
         if !command && ctx.input(|input| input.key_pressed(egui::Key::T)) {
             self.toggle_appearance(ctx);
+        }
+        if !command && ctx.input(|input| input.key_pressed(egui::Key::G)) {
+            self.canvas_background = self.canvas_background.next();
+        }
+        if !command && ctx.input(|input| input.key_pressed(egui::Key::X)) {
+            self.reset_orientation();
+        }
+        if !command && ctx.input(|input| input.key_pressed(egui::Key::OpenBracket)) {
+            self.adjust_slideshow_speed(false);
+        }
+        if !command && ctx.input(|input| input.key_pressed(egui::Key::CloseBracket)) {
+            self.adjust_slideshow_speed(true);
         }
         if !command && ctx.input(|input| input.key_pressed(egui::Key::F)) {
             self.toggle_fullscreen(ctx);
@@ -696,15 +792,140 @@ impl EagleApp {
                                 self.toggle_appearance(ui.ctx());
                             }
                             ui.menu_button(format!("{}  More", icons::DOTS_THREE), |ui| {
-                                if ui.button("Copy file path    Cmd+Shift+C").clicked() {
+                                let recent_entries = self.recent_files.entries().to_vec();
+                                let mut selected_recent = None;
+                                let mut clear_recents = false;
+                                ui.menu_button(
+                                    format!("{}  Open Recent", icons::CLOCK_COUNTER_CLOCKWISE),
+                                    |ui| {
+                                        if recent_entries.is_empty() {
+                                            ui.add_enabled(
+                                                false,
+                                                egui::Button::new("No recent images"),
+                                            );
+                                        } else {
+                                            for path in &recent_entries {
+                                                let name = path
+                                                    .file_name()
+                                                    .unwrap_or_default()
+                                                    .to_string_lossy();
+                                                if ui
+                                                    .button(format!("{}  {name}", icons::IMAGE))
+                                                    .on_hover_text(path.display().to_string())
+                                                    .clicked()
+                                                {
+                                                    selected_recent = Some(path.clone());
+                                                    ui.close();
+                                                }
+                                            }
+                                            ui.separator();
+                                            if ui
+                                                .button(format!("{}  Clear Recent", icons::BROOM))
+                                                .clicked()
+                                            {
+                                                clear_recents = true;
+                                                ui.close();
+                                            }
+                                        }
+                                    },
+                                );
+                                if clear_recents {
+                                    self.recent_files.clear();
+                                }
+                                if let Some(path) = selected_recent {
+                                    self.open(path, true);
+                                }
+                                if ui
+                                    .button(format!(
+                                        "{}  Reopen most recent    Cmd+Shift+O",
+                                        icons::CLOCK_CLOCKWISE
+                                    ))
+                                    .clicked()
+                                {
+                                    self.open_most_recent();
+                                    ui.close();
+                                }
+
+                                ui.separator();
+                                ui.menu_button(
+                                    format!("{}  Canvas background", icons::CHECKERBOARD),
+                                    |ui| {
+                                        for (background, label) in [
+                                            (CanvasBackground::Automatic, "Automatic"),
+                                            (CanvasBackground::Black, "Black"),
+                                            (CanvasBackground::White, "White"),
+                                            (CanvasBackground::Checkerboard, "Checkerboard"),
+                                        ] {
+                                            if ui
+                                                .selectable_label(
+                                                    self.canvas_background == background,
+                                                    label,
+                                                )
+                                                .clicked()
+                                            {
+                                                self.canvas_background = background;
+                                                ui.close();
+                                            }
+                                        }
+                                    },
+                                );
+                                ui.menu_button(
+                                    format!("{}  Slideshow timing", icons::TIMER),
+                                    |ui| {
+                                        for seconds in [2, 3, 5, 10] {
+                                            if ui
+                                                .selectable_label(
+                                                    self.slideshow_seconds == seconds,
+                                                    format!("{seconds} seconds"),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.slideshow_seconds = seconds;
+                                                self.last_slide = Instant::now();
+                                                ui.close();
+                                            }
+                                        }
+                                    },
+                                );
+                                if ui
+                                    .button(format!(
+                                        "{}  Reset view and orientation    X",
+                                        icons::ARROWS_COUNTER_CLOCKWISE
+                                    ))
+                                    .clicked()
+                                {
+                                    self.reset_orientation();
+                                    ui.close();
+                                }
+
+                                ui.separator();
+                                if ui
+                                    .button(format!(
+                                        "{}  Copy file path    Cmd+Shift+C",
+                                        icons::COPY
+                                    ))
+                                    .clicked()
+                                {
                                     self.copy_current_path(ui.ctx());
                                     ui.close();
                                 }
-                                if ui.button("Reveal in Finder    Cmd+Shift+R").clicked() {
+                                if ui
+                                    .button(format!(
+                                        "{}  Reveal in Finder    Cmd+Shift+R",
+                                        icons::FOLDER_OPEN
+                                    ))
+                                    .clicked()
+                                {
                                     self.reveal_current();
                                     ui.close();
                                 }
-                                if ui.button("Save a copy...    Cmd+Shift+S").clicked() {
+                                if ui
+                                    .button(format!(
+                                        "{}  Save a copy...    Cmd+Shift+S",
+                                        icons::FLOPPY_DISK
+                                    ))
+                                    .clicked()
+                                {
                                     self.save_current_copy();
                                     ui.close();
                                 }
@@ -1012,12 +1233,20 @@ impl EagleApp {
 
     fn viewer(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
-        let canvas_fill = if self.dark_mode {
-            Color32::from_rgb(10, 11, 13)
-        } else {
-            Color32::from_rgb(218, 219, 223)
+        let canvas_fill = match self.canvas_background {
+            CanvasBackground::Automatic if self.dark_mode => Color32::from_rgb(10, 11, 13),
+            CanvasBackground::Automatic => Color32::from_rgb(218, 219, 223),
+            CanvasBackground::Black => Color32::BLACK,
+            CanvasBackground::White => Color32::WHITE,
+            CanvasBackground::Checkerboard if self.dark_mode => Color32::from_rgb(28, 30, 35),
+            CanvasBackground::Checkerboard => Color32::from_rgb(222, 224, 229),
         };
-        let secondary_text = if self.dark_mode {
+        let canvas_is_dark = match self.canvas_background {
+            CanvasBackground::Black => true,
+            CanvasBackground::White => false,
+            _ => self.dark_mode,
+        };
+        let secondary_text = if canvas_is_dark {
             Color32::from_gray(155)
         } else {
             Color32::from_gray(75)
@@ -1028,6 +1257,9 @@ impl EagleApp {
                 let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
                 let viewport = response.rect;
                 self.last_viewport = Some(viewport);
+                if self.canvas_background == CanvasBackground::Checkerboard {
+                    paint_checkerboard(&painter, viewport, self.dark_mode);
+                }
 
                 let primary_drag = response.dragged_by(PointerButton::Primary);
                 let middle_drag = response.dragged_by(PointerButton::Middle);
@@ -1198,7 +1430,9 @@ impl eframe::App for EagleApp {
         self.filmstrip(ui);
         self.viewer(ui);
 
-        if self.slideshow && self.last_slide.elapsed() >= Duration::from_secs(3) {
+        if self.slideshow
+            && self.last_slide.elapsed() >= Duration::from_secs(self.slideshow_seconds)
+        {
             if self.catalog.position() + 1 < self.catalog.len() {
                 self.move_by(1);
             } else if self.catalog.set_position(0) {

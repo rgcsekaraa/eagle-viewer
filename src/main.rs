@@ -3,6 +3,7 @@ mod cache;
 mod catalog;
 mod detail;
 mod loader;
+mod recent;
 mod view;
 
 use std::{path::PathBuf, sync::Arc};
