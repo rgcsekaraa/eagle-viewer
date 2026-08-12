@@ -47,6 +47,9 @@ impl ViewTransform {
             let ratio = self.target_zoom / old_zoom;
             self.target_pan -= from_center * (ratio - 1.0);
         }
+        // Direct manipulation should track the mouse/trackpad with no animation lag.
+        self.zoom = self.target_zoom;
+        self.pan = self.target_pan;
     }
 
     pub fn pan_by(&mut self, delta: Vec2) {
@@ -106,5 +109,32 @@ mod tests {
             [100, 50],
         );
         assert_eq!(rect.size(), vec2(100.0, 50.0));
+    }
+
+    #[test]
+    fn pointer_zoom_keeps_the_source_point_under_the_cursor() {
+        let viewport = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0));
+        let pointer = pos2(700.0, 300.0);
+        let mut view = ViewTransform::default();
+        let before = view.image_rect(viewport, [2000, 1000]);
+        let source = (pointer - before.min) / before.size();
+
+        view.zoom_by(2.0, Some(pointer), viewport);
+        let after = view.image_rect(viewport, [2000, 1000]);
+        let projected = after.min + source * after.size();
+
+        assert!((projected - pointer).length() < 0.01);
+    }
+
+    #[test]
+    fn panning_moves_the_rendered_image_immediately() {
+        let viewport = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0));
+        let mut view = ViewTransform::default();
+        let before = view.image_rect(viewport, [2000, 1000]);
+
+        view.pan_by(vec2(45.0, -30.0));
+        let after = view.image_rect(viewport, [2000, 1000]);
+
+        assert_eq!(after.center() - before.center(), vec2(45.0, -30.0));
     }
 }

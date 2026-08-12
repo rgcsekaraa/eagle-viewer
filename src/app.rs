@@ -6,10 +6,11 @@ use std::{
 };
 
 use eframe::egui::{
-    self, Color32, FontId, Mesh, Pos2, Rect, Response, RichText, Sense, Stroke, TextureHandle,
-    TextureOptions, Vec2, vec2,
+    self, Color32, FontId, Mesh, PointerButton, Pos2, Rect, Response, RichText, Sense,
+    TextureHandle, TextureOptions, Vec2, vec2,
 };
 use eframe::epaint::Vertex;
+use egui_phosphor::regular as icons;
 
 use crate::{
     cache::{CachedPreview, PreviewCache},
@@ -24,210 +25,31 @@ const TILE_SIZE: u32 = 512;
 const MAX_GPU_TILES: usize = 256;
 const TOOLBAR_BUTTON_HEIGHT: f32 = 34.0;
 
-#[derive(Clone, Copy)]
-enum ToolbarIcon {
-    Folder,
-    Previous,
-    Next,
-    ZoomOut,
-    ZoomIn,
-    RotateLeft,
-    RotateRight,
-    FlipHorizontal,
-    FlipVertical,
-    Fullscreen,
-    Theme,
-}
-
-fn paint_toolbar_icon(painter: &egui::Painter, rect: Rect, icon: ToolbarIcon, stroke: Stroke) {
-    let center = rect.center();
-    let left = rect.left();
-    let right = rect.right();
-    let top = rect.top();
-    let bottom = rect.bottom();
-    let line = |points: Vec<Pos2>| painter.add(egui::Shape::line(points, stroke));
-
-    match icon {
-        ToolbarIcon::Folder => {
-            let y = top + rect.height() * 0.3;
-            line(vec![
-                Pos2::new(left, y),
-                Pos2::new(left + rect.width() * 0.28, y),
-                Pos2::new(left + rect.width() * 0.4, top + 1.0),
-                Pos2::new(right - 1.0, top + 1.0),
-                Pos2::new(right, bottom - 1.0),
-                Pos2::new(left, bottom - 1.0),
-                Pos2::new(left, y),
-            ]);
-        }
-        ToolbarIcon::Previous => {
-            line(vec![
-                Pos2::new(center.x + 3.0, top + 2.0),
-                Pos2::new(center.x - 3.0, center.y),
-                Pos2::new(center.x + 3.0, bottom - 2.0),
-            ]);
-        }
-        ToolbarIcon::Next => {
-            line(vec![
-                Pos2::new(center.x - 3.0, top + 2.0),
-                Pos2::new(center.x + 3.0, center.y),
-                Pos2::new(center.x - 3.0, bottom - 2.0),
-            ]);
-        }
-        ToolbarIcon::ZoomOut => {
-            painter.line_segment(
-                [
-                    Pos2::new(left + 2.0, center.y),
-                    Pos2::new(right - 2.0, center.y),
-                ],
-                stroke,
-            );
-        }
-        ToolbarIcon::ZoomIn => {
-            painter.line_segment(
-                [
-                    Pos2::new(left + 2.0, center.y),
-                    Pos2::new(right - 2.0, center.y),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    Pos2::new(center.x, top + 2.0),
-                    Pos2::new(center.x, bottom - 2.0),
-                ],
-                stroke,
-            );
-        }
-        ToolbarIcon::RotateLeft | ToolbarIcon::RotateRight => {
-            let is_left = matches!(icon, ToolbarIcon::RotateLeft);
-            let points = (0..=16)
-                .map(|step| {
-                    let progress = step as f32 / 16.0;
-                    let angle = -0.7 + progress * 4.4;
-                    let point = center + vec2(angle.cos(), angle.sin()) * 6.5;
-                    if is_left {
-                        point
-                    } else {
-                        Pos2::new(2.0 * center.x - point.x, point.y)
-                    }
-                })
-                .collect();
-            line(points);
-            let left_tip = center + vec2(3.7_f32.cos(), 3.7_f32.sin()) * 6.5;
-            let tip = if is_left {
-                left_tip
-            } else {
-                Pos2::new(2.0 * center.x - left_tip.x, left_tip.y)
-            };
-            let inward = if is_left { 1.0 } else { -1.0 };
-            line(vec![
-                tip + vec2(inward * 4.5, -3.0),
-                tip,
-                tip + vec2(inward * 4.5, 3.0),
-            ]);
-        }
-        ToolbarIcon::FlipHorizontal => {
-            painter.line_segment(
-                [
-                    Pos2::new(left + 1.0, center.y),
-                    Pos2::new(right - 1.0, center.y),
-                ],
-                stroke,
-            );
-            line(vec![
-                Pos2::new(left + 5.0, center.y - 4.0),
-                Pos2::new(left + 1.0, center.y),
-                Pos2::new(left + 5.0, center.y + 4.0),
-            ]);
-            line(vec![
-                Pos2::new(right - 5.0, center.y - 4.0),
-                Pos2::new(right - 1.0, center.y),
-                Pos2::new(right - 5.0, center.y + 4.0),
-            ]);
-        }
-        ToolbarIcon::FlipVertical => {
-            painter.line_segment(
-                [
-                    Pos2::new(center.x, top + 1.0),
-                    Pos2::new(center.x, bottom - 1.0),
-                ],
-                stroke,
-            );
-            line(vec![
-                Pos2::new(center.x - 4.0, top + 5.0),
-                Pos2::new(center.x, top + 1.0),
-                Pos2::new(center.x + 4.0, top + 5.0),
-            ]);
-            line(vec![
-                Pos2::new(center.x - 4.0, bottom - 5.0),
-                Pos2::new(center.x, bottom - 1.0),
-                Pos2::new(center.x + 4.0, bottom - 5.0),
-            ]);
-        }
-        ToolbarIcon::Fullscreen => {
-            let arm = 5.0;
-            for (corner, x_direction, y_direction) in [
-                (rect.left_top(), 1.0, 1.0),
-                (rect.right_top(), -1.0, 1.0),
-                (rect.left_bottom(), 1.0, -1.0),
-                (rect.right_bottom(), -1.0, -1.0),
-            ] {
-                painter.line_segment([corner, corner + vec2(x_direction * arm, 0.0)], stroke);
-                painter.line_segment([corner, corner + vec2(0.0, y_direction * arm)], stroke);
-            }
-        }
-        ToolbarIcon::Theme => {
-            painter.circle_stroke(center, 4.0, stroke);
-            for step in 0..8 {
-                let angle = step as f32 * std::f32::consts::TAU / 8.0;
-                let direction = vec2(angle.cos(), angle.sin());
-                painter.line_segment([center + direction * 6.5, center + direction * 8.0], stroke);
-            }
-        }
-    }
-}
-
-fn toolbar_icon_button(ui: &mut egui::Ui, icon: ToolbarIcon, enabled: bool) -> Response {
-    let response = ui.add_enabled(
+fn toolbar_icon_button(ui: &mut egui::Ui, icon: &'static str, enabled: bool) -> Response {
+    ui.add_enabled(
         enabled,
-        egui::Button::new("").min_size(vec2(38.0, TOOLBAR_BUTTON_HEIGHT)),
-    );
-    let color = if enabled {
-        ui.style().interact(&response).fg_stroke.color
-    } else {
-        ui.visuals().weak_text_color()
-    };
-    paint_toolbar_icon(
-        ui.painter(),
-        Rect::from_center_size(response.rect.center(), vec2(16.0, 16.0)),
-        icon,
-        Stroke::new(1.8, color),
-    );
-    response
+        egui::Button::new(RichText::new(icon).size(20.0))
+            .min_size(vec2(38.0, TOOLBAR_BUTTON_HEIGHT)),
+    )
 }
 
 fn open_button(ui: &mut egui::Ui) -> Response {
-    let response = ui.add_sized(vec2(96.0, TOOLBAR_BUTTON_HEIGHT), egui::Button::new(""));
-    let color = ui.style().interact(&response).fg_stroke.color;
-    let icon_rect = Rect::from_center_size(
-        Pos2::new(response.rect.left() + 20.0, response.rect.center().y),
-        vec2(16.0, 14.0),
-    );
-    paint_toolbar_icon(
-        ui.painter(),
-        icon_rect,
-        ToolbarIcon::Folder,
-        Stroke::new(1.6, color),
-    );
-    ui.painter().text(
-        Pos2::new(response.rect.left() + 59.0, response.rect.center().y),
-        egui::Align2::CENTER_CENTER,
-        "Open",
-        FontId::proportional(15.0),
-        color,
-    );
-    response
+    ui.add_sized(
+        vec2(100.0, TOOLBAR_BUTTON_HEIGHT),
+        egui::Button::new(RichText::new(format!("{}  Open", icons::FOLDER_OPEN)).size(15.0)),
+    )
+}
+
+fn viewport_zoom_factor(gesture_zoom: f32, scroll: Vec2) -> Option<f32> {
+    if (gesture_zoom - 1.0).abs() > f32::EPSILON {
+        return Some(gesture_zoom);
+    }
+    let wheel_delta = if scroll.y.abs() >= scroll.x.abs() {
+        scroll.y
+    } else {
+        scroll.x
+    };
+    (wheel_delta.abs() > f32::EPSILON).then(|| (wheel_delta * 0.01).clamp(-1.0, 1.0).exp())
 }
 
 fn apply_appearance(ctx: &egui::Context, dark_mode: bool) {
@@ -307,6 +129,10 @@ impl EagleApp {
         screenshot_path: Option<PathBuf>,
         forced_dark_mode: Option<bool>,
     ) -> Self {
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        cc.egui_ctx.set_fonts(fonts);
+
         let dark_mode = forced_dark_mode.unwrap_or_else(|| {
             cc.egui_ctx
                 .input(|input| !matches!(input.raw.system_theme, Some(egui::Theme::Light)))
@@ -724,14 +550,14 @@ impl EagleApp {
 
                             ui.separator();
                             let can_previous = self.catalog.position() > 0;
-                            if toolbar_icon_button(ui, ToolbarIcon::Previous, can_previous)
+                            if toolbar_icon_button(ui, icons::CARET_LEFT, can_previous)
                                 .on_hover_text("Previous image (Left Arrow)")
                                 .clicked()
                             {
                                 self.move_by(-1);
                             }
                             let can_next = self.catalog.position() + 1 < self.catalog.len();
-                            if toolbar_icon_button(ui, ToolbarIcon::Next, can_next)
+                            if toolbar_icon_button(ui, icons::CARET_RIGHT, can_next)
                                 .on_hover_text("Next image (Right Arrow)")
                                 .clicked()
                             {
@@ -739,13 +565,13 @@ impl EagleApp {
                             }
 
                             ui.separator();
-                            if toolbar_icon_button(ui, ToolbarIcon::ZoomOut, true)
+                            if toolbar_icon_button(ui, icons::MINUS, true)
                                 .on_hover_text("Zoom out (-)")
                                 .clicked()
                             {
                                 self.view.zoom_step(0.8);
                             }
-                            if toolbar_icon_button(ui, ToolbarIcon::ZoomIn, true)
+                            if toolbar_icon_button(ui, icons::PLUS, true)
                                 .on_hover_text("Zoom in (+)")
                                 .clicked()
                             {
@@ -753,8 +579,8 @@ impl EagleApp {
                             }
                             if ui
                                 .add_sized(
-                                    vec2(52.0, TOOLBAR_BUTTON_HEIGHT),
-                                    egui::Button::new("Fit"),
+                                    vec2(64.0, TOOLBAR_BUTTON_HEIGHT),
+                                    egui::Button::new(format!("{}  Fit", icons::ARROWS_IN_SIMPLE)),
                                 )
                                 .on_hover_text("Fit to window (0)")
                                 .clicked()
@@ -778,27 +604,27 @@ impl EagleApp {
                             }
 
                             ui.separator();
-                            if toolbar_icon_button(ui, ToolbarIcon::RotateLeft, true)
+                            if toolbar_icon_button(ui, icons::ARROW_COUNTER_CLOCKWISE, true)
                                 .on_hover_text("Rotate counterclockwise (Shift+R)")
                                 .clicked()
                             {
                                 self.rotation = (self.rotation + 3) % 4;
                                 self.view.reset();
                             }
-                            if toolbar_icon_button(ui, ToolbarIcon::RotateRight, true)
+                            if toolbar_icon_button(ui, icons::ARROW_CLOCKWISE, true)
                                 .on_hover_text("Rotate clockwise (R)")
                                 .clicked()
                             {
                                 self.rotation = (self.rotation + 1) % 4;
                                 self.view.reset();
                             }
-                            if toolbar_icon_button(ui, ToolbarIcon::FlipHorizontal, true)
+                            if toolbar_icon_button(ui, icons::FLIP_HORIZONTAL, true)
                                 .on_hover_text("Flip horizontally (H)")
                                 .clicked()
                             {
                                 self.flip_horizontal = !self.flip_horizontal;
                             }
-                            if toolbar_icon_button(ui, ToolbarIcon::FlipVertical, true)
+                            if toolbar_icon_button(ui, icons::FLIP_VERTICAL, true)
                                 .on_hover_text("Flip vertically (V)")
                                 .clicked()
                             {
@@ -808,8 +634,9 @@ impl EagleApp {
                             ui.separator();
                             if ui
                                 .add_sized(
-                                    vec2(56.0, TOOLBAR_BUTTON_HEIGHT),
-                                    egui::Button::new("Info").selected(self.show_info),
+                                    vec2(70.0, TOOLBAR_BUTTON_HEIGHT),
+                                    egui::Button::new(format!("{}  Info", icons::INFO))
+                                        .selected(self.show_info),
                                 )
                                 .on_hover_text("Image information (I)")
                                 .clicked()
@@ -818,8 +645,9 @@ impl EagleApp {
                             }
                             if ui
                                 .add_sized(
-                                    vec2(86.0, TOOLBAR_BUTTON_HEIGHT),
-                                    egui::Button::new("Filmstrip").selected(self.show_filmstrip),
+                                    vec2(110.0, TOOLBAR_BUTTON_HEIGHT),
+                                    egui::Button::new(format!("{}  Filmstrip", icons::FILM_STRIP))
+                                        .selected(self.show_filmstrip),
                                 )
                                 .on_hover_text("Toggle filmstrip (B)")
                                 .clicked()
@@ -828,11 +656,11 @@ impl EagleApp {
                             }
                             if ui
                                 .add_sized(
-                                    vec2(60.0, TOOLBAR_BUTTON_HEIGHT),
+                                    vec2(82.0, TOOLBAR_BUTTON_HEIGHT),
                                     egui::Button::new(if self.slideshow {
-                                        "Pause"
+                                        format!("{}  Pause", icons::PAUSE)
                                     } else {
-                                        "Play"
+                                        format!("{}  Play", icons::PLAY)
                                     })
                                     .selected(self.slideshow),
                                 )
@@ -842,23 +670,31 @@ impl EagleApp {
                                 self.slideshow = !self.slideshow;
                                 self.last_slide = Instant::now();
                             }
-                            if toolbar_icon_button(ui, ToolbarIcon::Fullscreen, true)
+                            if toolbar_icon_button(ui, icons::CORNERS_OUT, true)
                                 .on_hover_text("Toggle fullscreen (F)")
                                 .clicked()
                             {
                                 self.toggle_fullscreen(ui.ctx());
                             }
-                            if toolbar_icon_button(ui, ToolbarIcon::Theme, true)
-                                .on_hover_text(if self.dark_mode {
-                                    "Use light appearance (T)"
+                            if toolbar_icon_button(
+                                ui,
+                                if self.dark_mode {
+                                    icons::SUN
                                 } else {
-                                    "Use dark appearance (T)"
-                                })
-                                .clicked()
+                                    icons::MOON
+                                },
+                                true,
+                            )
+                            .on_hover_text(if self.dark_mode {
+                                "Use light appearance (T)"
+                            } else {
+                                "Use dark appearance (T)"
+                            })
+                            .clicked()
                             {
                                 self.toggle_appearance(ui.ctx());
                             }
-                            ui.menu_button("More", |ui| {
+                            ui.menu_button(format!("{}  More", icons::DOTS_THREE), |ui| {
                                 if ui.button("Copy file path    Cmd+Shift+C").clicked() {
                                     self.copy_current_path(ui.ctx());
                                     ui.close();
@@ -1188,22 +1024,36 @@ impl EagleApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(canvas_fill))
             .show(root, |ui| {
-                let (response, painter) =
-                    ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+                let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
                 let viewport = response.rect;
                 self.last_viewport = Some(viewport);
 
-                if response.dragged() {
+                let primary_drag = response.dragged_by(PointerButton::Primary);
+                let middle_drag = response.dragged_by(PointerButton::Middle);
+                if primary_drag || middle_drag {
                     self.view.pan_by(response.drag_delta());
                 }
-                if response.double_clicked() {
+                if response.contains_pointer() {
+                    ui.ctx().set_cursor_icon(if primary_drag || middle_drag {
+                        egui::CursorIcon::Grabbing
+                    } else {
+                        egui::CursorIcon::Grab
+                    });
+                }
+
+                let double_clicked = response.contains_pointer()
+                    && ctx
+                        .input(|input| input.pointer.button_double_clicked(PointerButton::Primary));
+                if double_clicked {
                     self.view.reset();
                 }
-                if response.hovered() {
-                    let scroll = ctx.input(|input| input.smooth_scroll_delta.y);
-                    if scroll.abs() > 0.0 {
-                        self.view
-                            .zoom_by((scroll * 0.0025).exp(), response.hover_pos(), viewport);
+
+                if response.contains_pointer() {
+                    let pointer = ctx.input(|input| input.pointer.latest_pos());
+                    let (gesture_zoom, scroll) =
+                        ctx.input(|input| (input.zoom_delta(), input.smooth_scroll_delta()));
+                    if let Some(factor) = viewport_zoom_factor(gesture_zoom, scroll) {
+                        self.view.zoom_by(factor, pointer, viewport);
                     }
                 }
 
@@ -1391,5 +1241,18 @@ fn human_bytes(bytes: u64) -> String {
         format!("{bytes} B")
     } else {
         format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mouse_wheel_and_pinch_both_produce_zoom() {
+        assert!(viewport_zoom_factor(1.0, vec2(0.0, 14.0)).unwrap() > 1.0);
+        assert!(viewport_zoom_factor(1.0, vec2(0.0, -14.0)).unwrap() < 1.0);
+        assert_eq!(viewport_zoom_factor(1.25, Vec2::ZERO), Some(1.25));
+        assert_eq!(viewport_zoom_factor(1.0, Vec2::ZERO), None);
     }
 }

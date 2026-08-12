@@ -81,8 +81,9 @@ cargo run --release -- "/path/to/image.jpg"
 | `0` | Fit image to the window |
 | `1` | Show actual pixels (100%) |
 | `+` / `-` | Zoom in / out |
-| Trackpad scroll | Zoom around the pointer |
-| Click and drag | Pan |
+| Mouse wheel / trackpad scroll | Zoom around the pointer |
+| Trackpad pinch | Native cursor-centred zoom |
+| Primary or middle-button drag | Pan immediately |
 | Double-click | Fit image to the window |
 | `R` / `Shift+R` | Rotate clockwise / counterclockwise |
 | `H` / `V` | Flip horizontally / vertically |
@@ -133,6 +134,8 @@ open "target/release/bundle/osx/Card Scout.app"
 ## Contributing
 
 Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), follow the [Code of Conduct](CODE_OF_CONDUCT.md), and report security concerns through the process in [SECURITY.md](SECURITY.md).
+
+Toolbar symbols use [Phosphor Icons](https://phosphoricons.com/), distributed under the MIT License through `egui-phosphor`. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
 ## License
 

@@ -12,6 +12,7 @@ cp "$project_dir/target/release/eagle-viewer" "$contents_dir/MacOS/eagle-viewer"
 cp "$project_dir/macos/Info.plist" "$contents_dir/Info.plist"
 cp "$project_dir/macos/PkgInfo" "$contents_dir/PkgInfo"
 cp "$project_dir/assets/EagleViewer.icns" "$contents_dir/Resources/EagleViewer.icns"
+cp "$project_dir/THIRD_PARTY_LICENSES.md" "$contents_dir/Resources/THIRD_PARTY_LICENSES.md"
 chmod 755 "$contents_dir/MacOS/eagle-viewer"
 codesign --force --deep --sign - "$app_dir"
 

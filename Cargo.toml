@@ -1,6 +1,6 @@
 [package]
 name = "eagle-viewer"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 default-run = "eagle-viewer"
 description = "A GPU-first, low-latency image viewer for macOS"
@@ -15,6 +15,7 @@ categories = ["multimedia::images", "graphics"]
 anyhow = "1.0"
 crossbeam-channel = "0.5"
 eframe = { version = "0.35", default-features = false, features = ["accesskit", "default_fonts", "wgpu"] }
+egui-phosphor = "0.13"
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
 jpeg-decoder = "0.3"
 memmap2 = "0.9"
