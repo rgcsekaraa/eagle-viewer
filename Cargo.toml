@@ -1,6 +1,6 @@
 [package]
 name = "eagle-viewer"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 default-run = "eagle-viewer"
 description = "A GPU-first, low-latency image viewer for macOS"

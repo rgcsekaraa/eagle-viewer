@@ -24,7 +24,9 @@ use crate::{
 const CACHE_BUDGET: usize = 512 * 1024 * 1024;
 const TILE_SIZE: u32 = 512;
 const MAX_GPU_TILES: usize = 256;
-const TOOLBAR_BUTTON_HEIGHT: f32 = 34.0;
+const TOOLBAR_HEIGHT: f32 = 44.0;
+const TOOLBAR_BUTTON_HEIGHT: f32 = 28.0;
+const TOOLBAR_ICON_BUTTON_WIDTH: f32 = 32.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CanvasBackground {
@@ -48,15 +50,15 @@ impl CanvasBackground {
 fn toolbar_icon_button(ui: &mut egui::Ui, icon: &'static str, enabled: bool) -> Response {
     ui.add_enabled(
         enabled,
-        egui::Button::new(RichText::new(icon).size(20.0))
-            .min_size(vec2(38.0, TOOLBAR_BUTTON_HEIGHT)),
+        egui::Button::new(RichText::new(icon).size(17.0))
+            .min_size(vec2(TOOLBAR_ICON_BUTTON_WIDTH, TOOLBAR_BUTTON_HEIGHT)),
     )
 }
 
 fn open_button(ui: &mut egui::Ui) -> Response {
     ui.add_sized(
-        vec2(100.0, TOOLBAR_BUTTON_HEIGHT),
-        egui::Button::new(RichText::new(format!("{}  Open", icons::FOLDER_OPEN)).size(15.0)),
+        vec2(80.0, TOOLBAR_BUTTON_HEIGHT),
+        egui::Button::new(RichText::new(format!("{}  Open", icons::FOLDER_OPEN)).size(13.0)),
     )
 }
 
@@ -608,22 +610,23 @@ impl EagleApp {
             Color32::from_rgb(246, 246, 248)
         };
         egui::Panel::top("toolbar")
-            .exact_size(54.0)
+            .exact_size(TOOLBAR_HEIGHT)
             .frame(
                 egui::Frame::new()
                     .fill(toolbar_fill)
-                    .inner_margin(egui::Margin::symmetric(12, 8)),
+                    .inner_margin(egui::Margin::symmetric(10, 8)),
             )
             .show(root, |ui| {
-                ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
-                ui.spacing_mut().button_padding = vec2(10.0, 6.0);
-                ui.spacing_mut().interact_size = vec2(38.0, TOOLBAR_BUTTON_HEIGHT);
+                ui.spacing_mut().item_spacing = vec2(5.0, 0.0);
+                ui.spacing_mut().button_padding = vec2(7.0, 4.0);
+                ui.spacing_mut().interact_size =
+                    vec2(TOOLBAR_ICON_BUTTON_WIDTH, TOOLBAR_BUTTON_HEIGHT);
                 egui::ScrollArea::horizontal()
                     .id_salt("main-toolbar")
                     .show(ui, |ui| {
                         ui.horizontal_centered(|ui| {
                             let (icon_rect, _) = ui.allocate_exact_size(
-                                vec2(TOOLBAR_BUTTON_HEIGHT, 34.0),
+                                vec2(TOOLBAR_BUTTON_HEIGHT, TOOLBAR_BUTTON_HEIGHT),
                                 Sense::hover(),
                             );
                             ui.painter().image(
@@ -676,7 +679,7 @@ impl EagleApp {
                             }
                             if ui
                                 .add_sized(
-                                    vec2(64.0, TOOLBAR_BUTTON_HEIGHT),
+                                    vec2(56.0, TOOLBAR_BUTTON_HEIGHT),
                                     egui::Button::new(format!("{}  Fit", icons::ARROWS_IN_SIMPLE)),
                                 )
                                 .on_hover_text("Fit to window (0)")
@@ -686,7 +689,7 @@ impl EagleApp {
                             }
                             if ui
                                 .add_sized(
-                                    vec2(52.0, TOOLBAR_BUTTON_HEIGHT),
+                                    vec2(44.0, TOOLBAR_BUTTON_HEIGHT),
                                     egui::Button::new("1:1"),
                                 )
                                 .on_hover_text("Actual pixels (1)")
@@ -731,7 +734,7 @@ impl EagleApp {
                             ui.separator();
                             if ui
                                 .add_sized(
-                                    vec2(70.0, TOOLBAR_BUTTON_HEIGHT),
+                                    vec2(60.0, TOOLBAR_BUTTON_HEIGHT),
                                     egui::Button::new(format!("{}  Info", icons::INFO))
                                         .selected(self.show_info),
                                 )
@@ -742,7 +745,7 @@ impl EagleApp {
                             }
                             if ui
                                 .add_sized(
-                                    vec2(110.0, TOOLBAR_BUTTON_HEIGHT),
+                                    vec2(94.0, TOOLBAR_BUTTON_HEIGHT),
                                     egui::Button::new(format!("{}  Filmstrip", icons::FILM_STRIP))
                                         .selected(self.show_filmstrip),
                                 )
@@ -753,7 +756,7 @@ impl EagleApp {
                             }
                             if ui
                                 .add_sized(
-                                    vec2(82.0, TOOLBAR_BUTTON_HEIGHT),
+                                    vec2(70.0, TOOLBAR_BUTTON_HEIGHT),
                                     egui::Button::new(if self.slideshow {
                                         format!("{}  Pause", icons::PAUSE)
                                     } else {

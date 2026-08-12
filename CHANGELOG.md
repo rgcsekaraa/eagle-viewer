@@ -4,6 +4,12 @@ All notable changes to Eagle Viewer will be documented in this file. The project
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-12
+
+### Changed
+
+- Reduced the toolbar and every toolbar control proportionally for a denser, better-aligned macOS layout with more room for the image.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added
@@ -45,7 +51,8 @@ All notable changes to Eagle Viewer will be documented in this file. The project
 - Camera RAW embedded previews, including Sony ARW.
 - Native macOS fallback, folder prefetch, filmstrip and slideshow.
 
-[Unreleased]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/rgcsekaraa/eagle-viewer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rgcsekaraa/eagle-viewer/releases/tag/v0.1.0
