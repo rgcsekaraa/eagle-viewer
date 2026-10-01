@@ -20,7 +20,7 @@ image = { version = "0.25", default-features = false, features = ["bmp", "exr", 
 jpeg-decoder = "0.3"
 memmap2 = "0.9"
 png = "0.18"
-rawler = { version = "0.7.2", default-features = false }
+rawler = { version = "0.8.0", default-features = false }
 rfd = "0.17"
 zune-jpeg = "0.5"
 
