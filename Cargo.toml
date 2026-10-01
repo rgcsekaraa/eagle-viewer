@@ -15,7 +15,7 @@ categories = ["multimedia::images", "graphics"]
 anyhow = "1.0"
 crossbeam-channel = "0.5"
 eframe = { version = "0.35", default-features = false, features = ["accesskit", "default_fonts", "wgpu"] }
-egui-phosphor = "0.13"
+egui-phosphor = "0.14"
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
 jpeg-decoder = "0.3"
 memmap2 = "0.9"
